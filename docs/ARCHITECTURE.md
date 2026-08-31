@@ -2,6 +2,8 @@
 
 Marketplace de compra e venda de cartas de consórcio contempladas e não contempladas, entre usuários verificados (pessoa física e jurídica).
 
+> **v2 — revisão**: adicionado papel `staff/admin` com policies de moderação, máquinas de estado explícitas de anúncio/transação, matriz de RLS ("quem vê o quê"), busca textual via `pg_trgm` (sem dependência externa no MVP), tabela de favoritos, idempotência de webhook de pagamento (`gateway + gateway_referencia` único), sincronização automática de `kyc_status` e `reputacao_media` por trigger, e trava de "uma cota = um anúncio ativo por vez". Detalhes no schema (`supabase/migrations/0001_init.sql`).
+
 ## 1. Visão geral
 
 O Consórcio Livre conecta quem quer **vender uma cota de consórcio** (contemplada ou não, de imóvel, veículo, moto, serviços etc.) a quem quer **comprar essa cota** por um valor abaixo do saldo devedor, evitando os ágios e a opacidade do mercado informal (grupos de WhatsApp, classificados sem garantia).
@@ -25,7 +27,7 @@ Fora de escopo do MVP: a plataforma não é uma administradora de consórcio (re
 | **Suporte/Compliance** | Acompanha KYC, denúncias, bloqueios, relatórios de prevenção a fraude. |
 | **Sistema/Backoffice** | Jobs automáticos: expiração de anúncios, lembretes, reconciliação de pagamentos. |
 
-Um mesmo usuário pode ser comprador e vendedor.
+Um mesmo usuário pode ser comprador e vendedor. No banco isso é modelado com uma única coluna `profiles.role` (`user` / `staff` / `admin`) em vez de tabelas separadas — staff e admin apenas herdam permissões de leitura/moderação mais amplas via RLS (função `is_staff()`), evitando duplicar o cadastro de uma pessoa em duas tabelas.
 
 ## 3. Modelo de domínio
 
@@ -90,6 +92,42 @@ User 1---N Denuncia (autor)
 ### 4.5 Reputação
 - Após a transação concluída, ambos avaliam um ao outro (nota 1–5 + comentário). Score exibido no perfil.
 
+### 4.6 Máquinas de estado
+
+**Anúncio**
+```
+rascunho → em_analise → publicado → vendido
+                 ↓            ↓
+             reprovado     pausado → publicado
+                              ↓
+                          expirado
+```
+Regra de integridade: uma mesma `cota` só pode ter **um** anúncio em estado "vivo" (`rascunho`, `em_analise`, `publicado` ou `pausado`) por vez — garantido por índice único parcial, não só por regra de aplicação, para não depender de o backend nunca ter um bug de corrida.
+
+**Transação**
+```
+aguardando_pagamento → pagamento_em_escrow → em_transferencia → concluida
+        ↓                      ↓                    ↓
+    cancelada              em_disputa ──────→ reembolsada
+```
+Toda mudança de status grava uma linha em `transacao_eventos` (quem, quando, de onde) — é a trilha de auditoria exigida para disputas e para compliance.
+
+### 4.7 Quem vê o quê (RLS)
+
+| Tabela | Dono/parte | Outro usuário | Staff/Admin |
+|---|---|---|---|
+| `profiles` | lê/edita o próprio | — | lê todos |
+| `kyc_verificacoes` | lê o próprio | — | lê/edita todos (aprovação) |
+| `cotas` | dono lê/edita | lê só se houver anúncio `publicado` dela | lê todas |
+| `titularidade_documentos` | dono lê | **nunca** (nem o comprador) | lê todos |
+| `anuncios` | dono lê/edita todos os status | lê só `publicado` | lê/edita todos |
+| `propostas` / `transacoes` / `pagamentos` | comprador e vendedor da negociação | — | lê todos |
+| `chat_mensagens` | as duas partes da conversa | — | lê todas (moderação) |
+| `avaliacoes` | qualquer um lê (é reputação pública) | leitura pública | — |
+| `notificacoes` | só o destinatário | — | — |
+
+`titularidade_documentos` é a linha mais sensível do sistema: o comprador nunca acessa o contrato original do vendedor diretamente pelo banco — apenas os dados já resumidos e validados na `cota`/`anuncio`. Isso evita vazamento de CPF/dados bancários de terceiros embutidos em extratos de administradora.
+
 ## 5. Arquitetura técnica
 
 ### 5.1 Stack proposta
@@ -115,13 +153,17 @@ User 1---N Denuncia (autor)
 - **RLS no Postgres**: políticas por tabela — usuário só lê/escreve seus próprios registros; anúncios `publicado` são públicos, o resto é restrito.
 - **Antifraude**: rate limit em cadastro/propostas, verificação de duplicidade de CPF/cota, bloqueio de troca de contato externo no chat (regex + moderação), lista de administradoras/documentos "conhecidos" para reduzir golpes.
 - **Segregação de segredos**: chaves do gateway de pagamento e do provedor de KYC apenas em Edge Functions/servidor, nunca no client.
-- **Trilha de auditoria**: toda mudança de status de transação/anúncio grava histórico (quem, quando, de onde).
+- **Trilha de auditoria**: toda mudança de status de transação/anúncio grava histórico (quem, quando, de onde) em `transacao_eventos`.
+- **Idempotência de pagamento**: webhooks do gateway são gravados com `(gateway, gateway_referencia)` único — reentrega do mesmo evento pelo provedor não duplica a liberação de escrow. A escrita nessa tabela é feita exclusivamente pela Edge Function com `service_role` (o client nunca marca um pagamento como confirmado).
+- **Busca**: MVP usa índice `pg_trgm` do próprio Postgres em título/descrição do anúncio — evita depender de um serviço de busca externo (Algolia/Meilisearch) antes de haver volume que justifique o custo; migrar é um passo isolado quando o catálogo crescer.
 
 ## 6. Modelo de dados (schema inicial)
 
 Ver `supabase/migrations/0001_init.sql` para o DDL completo. Tabelas principais:
 
-`profiles`, `kyc_verifications`, `administradoras`, `cotas`, `titularidade_documentos`, `anuncios`, `anuncio_midias`, `propostas`, `transacoes`, `pagamentos`, `chat_threads`, `chat_mensagens`, `avaliacoes`, `denuncias`, `notificacoes`.
+`profiles`, `kyc_verificacoes`, `administradoras`, `cotas`, `titularidade_documentos`, `anuncios`, `anuncio_midias`, `favoritos`, `propostas`, `transacoes`, `transacao_eventos`, `pagamentos`, `chat_threads`, `chat_mensagens`, `avaliacoes`, `denuncias`, `notificacoes`.
+
+Regras mantidas pelo próprio banco (não só pela aplicação), via constraint/trigger, por serem invariantes de negócio que não podem depender do backend nunca ter um bug: uma cota não pode ter dois anúncios ativos simultâneos; `kyc_status` e `reputacao_media` em `profiles` são sempre um reflexo automático de `kyc_verificacoes`/`avaliacoes`, nunca escritos diretamente; um evento de pagamento do gateway nunca é processado duas vezes.
 
 ## 7. Monetização
 
