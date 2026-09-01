@@ -328,6 +328,7 @@ create index idx_avaliacoes_alvo on avaliacoes (alvo_id);
 -- is_staff) tem select amplo para moderação; nada é liberado por omissão.
 -- ---------------------------------------------------------------------------
 alter table profiles enable row level security;
+alter table administradoras enable row level security;
 alter table kyc_verificacoes enable row level security;
 alter table cotas enable row level security;
 alter table titularidade_documentos enable row level security;
@@ -347,7 +348,14 @@ alter table notificacoes enable row level security;
 -- profiles: cada um lê/edita o próprio registro; staff enxerga todos (moderação/KYC).
 create policy "profiles_select_own_or_staff" on profiles for select
   using (auth.uid() = id or is_staff(auth.uid()));
+create policy "profiles_insert_own" on profiles for insert with check (auth.uid() = id);
 create policy "profiles_update_own" on profiles for update using (auth.uid() = id);
+
+-- administradoras: catálogo público para leitura (necessário para busca/formulário de
+-- anúncio); só staff cadastra/edita administradoras novas.
+create policy "administradoras_select_public" on administradoras for select using (true);
+create policy "administradoras_write_staff" on administradoras for insert with check (is_staff(auth.uid()));
+create policy "administradoras_update_staff" on administradoras for update using (is_staff(auth.uid()));
 
 -- kyc_verificacoes: só o dono e staff (aprovação) enxergam.
 create policy "kyc_select_own_or_staff" on kyc_verificacoes for select

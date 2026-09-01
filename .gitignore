@@ -7,3 +7,5 @@ dist/
 .DS_Store
 *.log
 .vercel/
+*.tsbuildinfo
+next-env.d.ts
