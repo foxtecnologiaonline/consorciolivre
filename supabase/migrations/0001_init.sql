@@ -416,12 +416,25 @@ create policy "propostas_update_partes" on propostas for update
   );
 
 -- transacoes / eventos / pagamentos: só comprador, vendedor e staff. Escrita real
--- de pagamento acontece via service_role (webhook do gateway), não pelo client.
+-- de pagamento (confirmação do gateway) acontece via service_role (webhook), não
+-- pelo client — mas no MVP sem gateway, as transições de status do escrow manual
+-- (aguardando_pagamento -> ... -> concluida/cancelada/em_disputa) são feitas pelas
+-- próprias partes ou por staff, daí o insert/update abaixo.
 create policy "transacoes_select_partes_ou_staff" on transacoes for select
   using (comprador_id = auth.uid() or vendedor_id = auth.uid() or is_staff(auth.uid()));
+create policy "transacoes_insert_vendedor" on transacoes for insert
+  with check (vendedor_id = auth.uid());
+create policy "transacoes_update_partes_ou_staff" on transacoes for update
+  using (comprador_id = auth.uid() or vendedor_id = auth.uid() or is_staff(auth.uid()));
+
 create policy "transacao_eventos_select_partes_ou_staff" on transacao_eventos for select
   using (is_staff(auth.uid()) or exists (
     select 1 from transacoes t where t.id = transacao_eventos.transacao_id
+    and (t.comprador_id = auth.uid() or t.vendedor_id = auth.uid())
+  ));
+create policy "transacao_eventos_insert_partes_ou_staff" on transacao_eventos for insert
+  with check (is_staff(auth.uid()) or exists (
+    select 1 from transacoes t where t.id = transacao_id
     and (t.comprador_id = auth.uid() or t.vendedor_id = auth.uid())
   ));
 create policy "pagamentos_select_partes_ou_staff" on pagamentos for select

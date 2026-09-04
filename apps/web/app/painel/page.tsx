@@ -40,6 +40,15 @@ export default async function PainelPage() {
         <Link href="/painel/anuncios" className="rounded border p-4 hover:bg-neutral-50">
           Meus anúncios
         </Link>
+        <Link href="/painel/propostas" className="rounded border p-4 hover:bg-neutral-50">
+          Propostas
+        </Link>
+        <Link href="/painel/chat" className="rounded border p-4 hover:bg-neutral-50">
+          Conversas
+        </Link>
+        <Link href="/painel/transacoes" className="rounded border p-4 hover:bg-neutral-50">
+          Transações
+        </Link>
         {(profile.role === "staff" || profile.role === "admin") && (
           <Link href="/painel/admin" className="rounded border p-4 hover:bg-neutral-50">
             Painel de moderação (staff)

@@ -43,26 +43,27 @@ export default async function VerificacaoPage({
           )}
           <form action={solicitarVerificacao} className="flex flex-col gap-3">
             <label className="text-sm">
-              Link do documento oficial (frente)
+              Documento oficial com foto (frente)
               <input
-                name="documento_frente_url"
-                placeholder="https://..."
+                type="file"
+                name="documento_frente"
+                accept="image/*,.pdf"
                 required
                 className="mt-1 w-full rounded border px-3 py-2"
               />
             </label>
             <label className="text-sm">
-              Link da selfie segurando o documento
+              Selfie segurando o documento
               <input
-                name="selfie_url"
-                placeholder="https://..."
+                type="file"
+                name="selfie"
+                accept="image/*"
                 required
                 className="mt-1 w-full rounded border px-3 py-2"
               />
             </label>
             <p className="text-xs text-neutral-500">
-              MVP: cole a URL do arquivo já enviado ao Storage. Upload direto pela tela entra na
-              próxima iteração.
+              Os arquivos ficam num bucket privado — só você e a equipe de verificação têm acesso.
             </p>
             <button type="submit" className="rounded bg-neutral-900 py-2 text-white">
               Enviar para análise

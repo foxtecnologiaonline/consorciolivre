@@ -52,21 +52,49 @@ export async function criarAnuncio(formData: FormData) {
   const preco = toNumber(formData.get("preco"));
 
   if (!titulo || !preco) {
+    await supabase.from("cotas").delete().eq("id", cota!.id);
     redirect("/painel/anuncios/novo?erro=" + encodeURIComponent("Preencha título e preço do anúncio."));
   }
 
-  const { error: erroAnuncio } = await supabase.from("anuncios").insert({
-    cota_id: cota!.id,
-    vendedor_id: profile.id,
-    titulo,
-    descricao: descricao || null,
-    preco,
-  });
+  const { data: anuncio, error: erroAnuncio } = await supabase
+    .from("anuncios")
+    .insert({
+      cota_id: cota!.id,
+      vendedor_id: profile.id,
+      titulo,
+      descricao: descricao || null,
+      preco,
+    })
+    .select("id")
+    .single();
 
-  if (erroAnuncio) {
+  if (erroAnuncio || !anuncio) {
     // Evita deixar uma cota órfã sem anúncio se o segundo insert falhar.
     await supabase.from("cotas").delete().eq("id", cota!.id);
-    redirect(`/painel/anuncios/novo?erro=${encodeURIComponent(erroAnuncio.message)}`);
+    redirect(`/painel/anuncios/novo?erro=${encodeURIComponent(erroAnuncio?.message ?? "Erro ao criar o anúncio.")}`);
+  }
+
+  const fotos = formData.getAll("fotos") as File[];
+  let ordem = 0;
+  for (const foto of fotos) {
+    if (!foto || foto.size === 0) continue;
+
+    const extensao = foto.name.split(".").pop() ?? "jpg";
+    const caminho = `${anuncio!.id}/${ordem}-${Date.now()}.${extensao}`;
+
+    const { error: erroUpload } = await supabase.storage
+      .from("anuncio-midias")
+      .upload(caminho, foto, { contentType: foto.type });
+
+    if (!erroUpload) {
+      const { data: publicUrl } = supabase.storage.from("anuncio-midias").getPublicUrl(caminho);
+      await supabase.from("anuncio_midias").insert({
+        anuncio_id: anuncio!.id,
+        url: publicUrl.publicUrl,
+        ordem,
+      });
+      ordem += 1;
+    }
   }
 
   redirect("/painel/anuncios");

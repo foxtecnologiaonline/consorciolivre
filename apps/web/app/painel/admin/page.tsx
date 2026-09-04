@@ -13,6 +13,9 @@ export default async function AdminPage() {
       <Link href="/painel/admin/anuncios" className="rounded border p-4 hover:bg-neutral-50">
         Anúncios pendentes de aprovação
       </Link>
+      <Link href="/painel/admin/disputas" className="rounded border p-4 hover:bg-neutral-50">
+        Disputas abertas
+      </Link>
     </main>
   );
 }

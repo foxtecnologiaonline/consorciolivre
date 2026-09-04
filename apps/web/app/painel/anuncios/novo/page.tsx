@@ -122,6 +122,16 @@ export default async function NovoAnuncioPage({
             required
             className="rounded border px-3 py-2"
           />
+          <label className="text-sm">
+            Fotos (opcional, até 6)
+            <input
+              type="file"
+              name="fotos"
+              accept="image/*"
+              multiple
+              className="mt-1 w-full rounded border px-3 py-2"
+            />
+          </label>
         </fieldset>
 
         <p className="text-xs text-neutral-500">

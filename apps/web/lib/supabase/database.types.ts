@@ -207,6 +207,224 @@ export interface Database {
           },
         ];
       };
+      propostas: {
+        Row: {
+          id: string;
+          anuncio_id: string;
+          comprador_id: string;
+          valor: number;
+          status: "pendente" | "aceita" | "recusada" | "expirada" | "cancelada";
+          criado_em: string;
+          respondido_em: string | null;
+        };
+        Insert: {
+          anuncio_id: string;
+          comprador_id: string;
+          valor: number;
+        };
+        Update: {
+          status?: "pendente" | "aceita" | "recusada" | "expirada" | "cancelada";
+          respondido_em?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "propostas_anuncio_id_fkey";
+            columns: ["anuncio_id"];
+            isOneToOne: false;
+            referencedRelation: "anuncios";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "propostas_comprador_id_fkey";
+            columns: ["comprador_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      transacoes: {
+        Row: {
+          id: string;
+          anuncio_id: string;
+          proposta_id: string | null;
+          comprador_id: string;
+          vendedor_id: string;
+          valor_acordado: number;
+          comissao_percentual: number;
+          comissao_valor: number;
+          status:
+            | "aguardando_pagamento"
+            | "pagamento_em_escrow"
+            | "em_transferencia"
+            | "concluida"
+            | "cancelada"
+            | "em_disputa"
+            | "reembolsada";
+          criado_em: string;
+          atualizado_em: string;
+        };
+        Insert: {
+          anuncio_id: string;
+          proposta_id?: string | null;
+          comprador_id: string;
+          vendedor_id: string;
+          valor_acordado: number;
+        };
+        Update: {
+          status?:
+            | "aguardando_pagamento"
+            | "pagamento_em_escrow"
+            | "em_transferencia"
+            | "concluida"
+            | "cancelada"
+            | "em_disputa"
+            | "reembolsada";
+        };
+        Relationships: [
+          {
+            foreignKeyName: "transacoes_anuncio_id_fkey";
+            columns: ["anuncio_id"];
+            isOneToOne: false;
+            referencedRelation: "anuncios";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "transacoes_comprador_id_fkey";
+            columns: ["comprador_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "transacoes_vendedor_id_fkey";
+            columns: ["vendedor_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      transacao_eventos: {
+        Row: {
+          id: string;
+          transacao_id: string;
+          status_anterior: string | null;
+          status_novo: string;
+          ator_id: string | null;
+          observacao: string | null;
+          criado_em: string;
+        };
+        Insert: {
+          transacao_id: string;
+          status_anterior?: string | null;
+          status_novo: string;
+          ator_id?: string | null;
+          observacao?: string | null;
+        };
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "transacao_eventos_transacao_id_fkey";
+            columns: ["transacao_id"];
+            isOneToOne: false;
+            referencedRelation: "transacoes";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      chat_threads: {
+        Row: {
+          id: string;
+          anuncio_id: string;
+          comprador_id: string;
+          vendedor_id: string;
+          criado_em: string;
+        };
+        Insert: {
+          anuncio_id: string;
+          comprador_id: string;
+          vendedor_id: string;
+        };
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "chat_threads_anuncio_id_fkey";
+            columns: ["anuncio_id"];
+            isOneToOne: false;
+            referencedRelation: "anuncios";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "chat_threads_comprador_id_fkey";
+            columns: ["comprador_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "chat_threads_vendedor_id_fkey";
+            columns: ["vendedor_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      chat_mensagens: {
+        Row: {
+          id: string;
+          thread_id: string;
+          autor_id: string;
+          conteudo: string;
+          sinalizada: boolean;
+          criado_em: string;
+        };
+        Insert: {
+          thread_id: string;
+          autor_id: string;
+          conteudo: string;
+          sinalizada?: boolean;
+        };
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "chat_mensagens_thread_id_fkey";
+            columns: ["thread_id"];
+            isOneToOne: false;
+            referencedRelation: "chat_threads";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      avaliacoes: {
+        Row: {
+          id: string;
+          transacao_id: string;
+          autor_id: string;
+          alvo_id: string;
+          nota: number;
+          comentario: string | null;
+          criado_em: string;
+        };
+        Insert: {
+          transacao_id: string;
+          autor_id: string;
+          alvo_id: string;
+          nota: number;
+          comentario?: string | null;
+        };
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "avaliacoes_transacao_id_fkey";
+            columns: ["transacao_id"];
+            isOneToOne: false;
+            referencedRelation: "transacoes";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
