@@ -3,10 +3,27 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireProfile } from "@/lib/auth";
+import {
+  TransicaoInvalidaError,
+  abrirDisputa as aplicarAberturaDisputa,
+  cancelarTransacao as aplicarCancelamento,
+  confirmarRecebimento as aplicarConfirmacaoRecebimento,
+  confirmarTransferencia as aplicarConfirmacaoTransferencia,
+  marcarPagamentoRealizado as aplicarMarcacaoPagamento,
+} from "@/lib/transacoes/state-machine";
+import type { Transacao as TransacaoDominio, TransacaoStatus } from "@/lib/transacoes/state-machine";
 
 async function carregarTransacao(supabase: any, id: string) {
   const { data } = await supabase.from("transacoes").select("*").eq("id", id).maybeSingle();
   return data;
+}
+
+function paraDominio(transacao: any): TransacaoDominio {
+  return {
+    status: transacao.status,
+    compradorId: transacao.comprador_id,
+    vendedorId: transacao.vendedor_id,
+  };
 }
 
 async function registrarEvento(
@@ -26,117 +43,68 @@ async function registrarEvento(
   });
 }
 
-// Comprador confirma que fez o pagamento (fora da plataforma, PIX/transferência
-// combinado no chat — não há gateway integrado neste MVP). Isso NÃO libera nada
-// automaticamente: só avisa o vendedor para conferir e iniciar a transferência
-// da cota junto à administradora.
-export async function marcarPagamentoRealizado(formData: FormData) {
+async function executarTransicao(
+  id: string,
+  aplicar: (
+    transacao: TransacaoDominio,
+    atorId: string
+  ) => { statusAnterior: TransacaoStatus; statusNovo: TransacaoStatus },
+  observacao: string
+) {
   const { supabase, profile } = await requireProfile();
-  const id = String(formData.get("id"));
   const transacao = await carregarTransacao(supabase, id);
 
-  if (!transacao || transacao.comprador_id !== profile.id || transacao.status !== "aguardando_pagamento") {
-    redirect(`/painel/transacoes/${id}?erro=` + encodeURIComponent("Ação não permitida neste momento."));
+  if (!transacao) {
+    redirect(`/painel/transacoes/${id}?erro=` + encodeURIComponent("Transação não encontrada."));
   }
 
-  await supabase.from("transacoes").update({ status: "pagamento_em_escrow" }).eq("id", id);
-  await registrarEvento(
-    supabase,
-    id,
-    "aguardando_pagamento",
-    "pagamento_em_escrow",
-    profile.id,
-    "Comprador confirmou o pagamento."
-  );
+  let transicao;
+  try {
+    transicao = aplicar(paraDominio(transacao), profile.id);
+  } catch (erro) {
+    const mensagem = erro instanceof TransicaoInvalidaError ? erro.message : "Ação não permitida neste momento.";
+    redirect(`/painel/transacoes/${id}?erro=` + encodeURIComponent(mensagem));
+  }
+
+  await supabase.from("transacoes").update({ status: transicao.statusNovo }).eq("id", id);
+  await registrarEvento(supabase, id, transicao.statusAnterior, transicao.statusNovo, profile.id, observacao);
 
   revalidatePath(`/painel/transacoes/${id}`);
+  return { transacao, profile, supabase };
 }
 
-// Vendedor confirma que recebeu o valor e vai iniciar a transferência de
-// titularidade da cota junto à administradora.
-export async function confirmarRecebimento(formData: FormData) {
-  const { supabase, profile } = await requireProfile();
+export async function marcarPagamentoRealizado(formData: FormData) {
   const id = String(formData.get("id"));
-  const transacao = await carregarTransacao(supabase, id);
+  await executarTransicao(id, aplicarMarcacaoPagamento, "Comprador confirmou o pagamento.");
+}
 
-  if (!transacao || transacao.vendedor_id !== profile.id || transacao.status !== "pagamento_em_escrow") {
-    redirect(`/painel/transacoes/${id}?erro=` + encodeURIComponent("Ação não permitida neste momento."));
-  }
-
-  await supabase.from("transacoes").update({ status: "em_transferencia" }).eq("id", id);
-  await registrarEvento(
-    supabase,
+export async function confirmarRecebimento(formData: FormData) {
+  const id = String(formData.get("id"));
+  await executarTransicao(
     id,
-    "pagamento_em_escrow",
-    "em_transferencia",
-    profile.id,
+    aplicarConfirmacaoRecebimento,
     "Vendedor confirmou o recebimento e iniciou a transferência na administradora."
   );
-
-  revalidatePath(`/painel/transacoes/${id}`);
 }
 
-// Comprador confirma que a administradora já efetivou a transferência da cota
-// para o nome dele — só então o valor é considerado liberado ao vendedor.
 export async function confirmarTransferencia(formData: FormData) {
-  const { supabase, profile } = await requireProfile();
   const id = String(formData.get("id"));
-  const transacao = await carregarTransacao(supabase, id);
-
-  if (!transacao || transacao.comprador_id !== profile.id || transacao.status !== "em_transferencia") {
-    redirect(`/painel/transacoes/${id}?erro=` + encodeURIComponent("Ação não permitida neste momento."));
-  }
-
-  await supabase.from("transacoes").update({ status: "concluida" }).eq("id", id);
-  await registrarEvento(
-    supabase,
+  await executarTransicao(
     id,
-    "em_transferencia",
-    "concluida",
-    profile.id,
+    aplicarConfirmacaoTransferencia,
     "Comprador confirmou a transferência da cota. Transação concluída."
   );
-
-  revalidatePath(`/painel/transacoes/${id}`);
 }
 
 export async function abrirDisputa(formData: FormData) {
-  const { supabase, profile } = await requireProfile();
   const id = String(formData.get("id"));
   const motivo = String(formData.get("motivo") ?? "").trim();
-  const transacao = await carregarTransacao(supabase, id);
-
-  if (!transacao || (transacao.comprador_id !== profile.id && transacao.vendedor_id !== profile.id)) {
-    redirect(`/painel/transacoes/${id}?erro=` + encodeURIComponent("Ação não permitida."));
-  }
-  if (!["pagamento_em_escrow", "em_transferencia"].includes(transacao.status)) {
-    redirect(`/painel/transacoes/${id}?erro=` + encodeURIComponent("Só é possível abrir disputa após o pagamento."));
-  }
-
-  await supabase.from("transacoes").update({ status: "em_disputa" }).eq("id", id);
-  await registrarEvento(supabase, id, transacao.status, "em_disputa", profile.id, motivo || "Disputa aberta.");
-
-  revalidatePath(`/painel/transacoes/${id}`);
+  await executarTransicao(id, aplicarAberturaDisputa, motivo || "Disputa aberta.");
 }
 
-// Cancelamento só antes de qualquer pagamento confirmado — depois disso, só staff
-// resolve (via disputa). Reabre o anúncio para outros compradores.
+// Cancelamento reabre o anúncio para outros compradores.
 export async function cancelarTransacao(formData: FormData) {
-  const { supabase, profile } = await requireProfile();
   const id = String(formData.get("id"));
-  const transacao = await carregarTransacao(supabase, id);
-
-  if (
-    !transacao ||
-    (transacao.comprador_id !== profile.id && transacao.vendedor_id !== profile.id) ||
-    transacao.status !== "aguardando_pagamento"
-  ) {
-    redirect(`/painel/transacoes/${id}?erro=` + encodeURIComponent("Ação não permitida neste momento."));
-  }
-
-  await supabase.from("transacoes").update({ status: "cancelada" }).eq("id", id);
-  await registrarEvento(supabase, id, "aguardando_pagamento", "cancelada", profile.id, "Transação cancelada.");
+  const { transacao, supabase } = await executarTransicao(id, aplicarCancelamento, "Transação cancelada.");
   await supabase.from("anuncios").update({ status: "publicado" }).eq("id", transacao.anuncio_id);
-
-  revalidatePath(`/painel/transacoes/${id}`);
 }
