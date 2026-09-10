@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   montarPayloadCriacaoRecebedor,
   montarPayloadPedidoPix,
+  montarPayloadTransferencia,
   type DadosBancarios,
   type DadosPedidoPix,
   type DadosRecebedor,
+  type DadosTransferencia,
 } from "./client";
 
 const recebedorPf: DadosRecebedor = {
@@ -104,5 +106,21 @@ describe("montarPayloadPedidoPix", () => {
 
     expect(payload.customer.document_type).toBe("CNPJ");
     expect(payload.payments[0].pix.expires_in).toBe(900);
+  });
+});
+
+describe("montarPayloadTransferencia", () => {
+  it("monta o payload de transferência com valor, recipient_id e metadata de conciliação", () => {
+    const dados: DadosTransferencia = {
+      recipientId: "rp_123",
+      valorCentavos: 142500,
+      referenciaExterna: "transacao-abc-123",
+    };
+
+    expect(montarPayloadTransferencia(dados)).toEqual({
+      amount: 142500,
+      recipient_id: "rp_123",
+      metadata: { transacao_id: "transacao-abc-123" },
+    });
   });
 });

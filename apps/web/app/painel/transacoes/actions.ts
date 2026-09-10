@@ -11,7 +11,7 @@ import {
   confirmarTransferencia as aplicarConfirmacaoTransferencia,
 } from "@/lib/transacoes/state-machine";
 import type { Transacao as TransacaoDominio, TransacaoStatus } from "@/lib/transacoes/state-machine";
-import { PagarmeError, criarPedidoPix } from "@/lib/pagarme/client";
+import { criarPedidoPix, criarTransferencia, PagarmeError } from "@/lib/pagarme/client";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 async function carregarTransacao(supabase: any, id: string) {
@@ -164,13 +164,72 @@ export async function confirmarRecebimento(formData: FormData) {
   );
 }
 
+// Move o valor líquido da plataforma para o recipient_id do vendedor no
+// Pagar.me — só agora, com a transferência de titularidade confirmada, o
+// dinheiro sai de fato da conta da plataforma (docs/ARCHITECTURE.md §5.1).
+// Roda com service_role: o comprador (quem disparou a ação) não tem — nem
+// deveria ter — permissão pra ler o pagarme_recipient_id do vendedor.
+//
+// Falha na transferência não desfaz a conclusão da transação do ponto de
+// vista do comprador (a cota já é dele) — fica um evento registrado para
+// staff reconciliar manualmente (ver item 7 do backlog, disputas).
+async function liberarEscrow(transacaoId: string, vendedorId: string, valorLiquido: number) {
+  const admin = createAdminClient();
+
+  const { data: vendedor } = await admin
+    .from("profiles")
+    .select("pagarme_recipient_id")
+    .eq("id", vendedorId)
+    .maybeSingle();
+
+  const { data: pagamento } = await admin
+    .from("pagamentos")
+    .select("id")
+    .eq("transacao_id", transacaoId)
+    .eq("status", "confirmado")
+    .maybeSingle();
+
+  if (!vendedor?.pagarme_recipient_id || !pagamento) {
+    await admin.from("transacao_eventos").insert({
+      transacao_id: transacaoId,
+      status_novo: "concluida",
+      observacao: "Liberação de escrow não disparada automaticamente: sem recipient_id ou pagamento confirmado.",
+    });
+    return;
+  }
+
+  try {
+    await criarTransferencia({
+      recipientId: vendedor.pagarme_recipient_id,
+      valorCentavos: Math.round(valorLiquido * 100),
+      referenciaExterna: transacaoId,
+    });
+    await admin
+      .from("pagamentos")
+      .update({ status: "liberado_vendedor", liberado_em: new Date().toISOString() })
+      .eq("id", pagamento.id);
+    await admin.from("transacao_eventos").insert({
+      transacao_id: transacaoId,
+      status_novo: "concluida",
+      observacao: "Escrow liberado: valor líquido transferido ao vendedor no Pagar.me.",
+    });
+  } catch {
+    await admin.from("transacao_eventos").insert({
+      transacao_id: transacaoId,
+      status_novo: "concluida",
+      observacao: "Falha ao transferir o escrow ao vendedor no Pagar.me — requer reconciliação manual.",
+    });
+  }
+}
+
 export async function confirmarTransferencia(formData: FormData) {
   const id = String(formData.get("id"));
-  await executarTransicao(
+  const { transacao } = await executarTransicao(
     id,
     aplicarConfirmacaoTransferencia,
     "Comprador confirmou a transferência da cota. Transação concluída."
   );
+  await liberarEscrow(id, transacao.vendedor_id, transacao.valor_acordado - transacao.comissao_valor);
 }
 
 export async function abrirDisputa(formData: FormData) {

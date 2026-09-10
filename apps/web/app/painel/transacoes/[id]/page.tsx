@@ -62,6 +62,14 @@ export default async function TransacaoDetalhePage({
     .eq("status", "pendente")
     .maybeSingle();
 
+  const { data: ultimoPagamento } = await supabase
+    .from("pagamentos")
+    .select("status")
+    .eq("transacao_id", params.id)
+    .order("criado_em", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
   const cobrancaPixValida =
     pagamentoPendente?.pix_qr_code && pagamentoPendente.expira_em && new Date(pagamentoPendente.expira_em) > new Date();
 
@@ -182,6 +190,14 @@ export default async function TransacaoDetalhePage({
             <input name="motivo" placeholder="Descreva o problema (opcional)" className="rounded border px-3 py-2 text-sm" />
             <button className="text-sm text-red-700 underline">Abrir disputa</button>
           </form>
+        )}
+
+        {transacao.status === "concluida" && ehVendedor && (
+          <p className="text-sm text-neutral-600">
+            {ultimoPagamento?.status === "liberado_vendedor"
+              ? "Valor liberado para sua conta cadastrada no Pagar.me."
+              : "Transação concluída — a liberação do valor para sua conta está sendo processada."}
+          </p>
         )}
 
         {transacao.status === "concluida" && !avaliacaoExistente && (

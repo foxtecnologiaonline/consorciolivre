@@ -230,3 +230,54 @@ export async function criarRecebedor(
   }
   return { id: dados.id };
 }
+
+export interface DadosTransferencia {
+  recipientId: string;
+  valorCentavos: number;
+  referenciaExterna: string; // transacoes.id, guardado em metadata pra conciliação
+}
+
+export interface PayloadTransferencia {
+  amount: number;
+  recipient_id: string;
+  metadata: { transacao_id: string };
+}
+
+export function montarPayloadTransferencia(dados: DadosTransferencia): PayloadTransferencia {
+  return {
+    amount: dados.valorCentavos,
+    recipient_id: dados.recipientId,
+    metadata: { transacao_id: dados.referenciaExterna },
+  };
+}
+
+// Move o valor líquido da conta da plataforma para o recipient_id do
+// vendedor — só é chamado na liberação de escrow (docs/ARCHITECTURE.md §5.1),
+// depois que a transferência de titularidade já foi confirmada. Até aqui o
+// dinheiro nunca tinha saído da plataforma (nenhum split na cobrança).
+export async function criarTransferencia(dados: DadosTransferencia): Promise<{ id: string }> {
+  const secretKey = process.env.PAGARME_SECRET_KEY;
+  if (!secretKey) {
+    throw new PagarmeError("PAGARME_SECRET_KEY não configurada.");
+  }
+
+  const resposta = await fetch(`${PAGARME_API_BASE}/transfers`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: autenticacaoBasica(secretKey),
+    },
+    body: JSON.stringify(montarPayloadTransferencia(dados)),
+  });
+
+  if (!resposta.ok) {
+    const corpo = await resposta.text();
+    throw new PagarmeError(`Falha ao transferir para o recebedor no Pagar.me (${resposta.status}): ${corpo}`);
+  }
+
+  const dadosResposta = (await resposta.json()) as { id: string };
+  if (!dadosResposta.id) {
+    throw new PagarmeError("Resposta do Pagar.me sem id de transferência.");
+  }
+  return { id: dadosResposta.id };
+}
