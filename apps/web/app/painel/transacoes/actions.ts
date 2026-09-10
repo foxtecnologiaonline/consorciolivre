@@ -14,6 +14,7 @@ import type { Transacao as TransacaoDominio, TransacaoStatus } from "@/lib/trans
 import { criarPedidoPix, PagarmeError } from "@/lib/pagarme/client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { liberarEscrow } from "@/lib/pagamentos/escrow";
+import { notificar } from "@/lib/notificacoes/notificar";
 
 async function carregarTransacao(supabase: any, id: string) {
   const { data } = await supabase.from("transacoes").select("*").eq("id", id).maybeSingle();
@@ -179,7 +180,15 @@ export async function confirmarTransferencia(formData: FormData) {
 export async function abrirDisputa(formData: FormData) {
   const id = String(formData.get("id"));
   const motivo = String(formData.get("motivo") ?? "").trim();
-  await executarTransicao(id, aplicarAberturaDisputa, motivo || "Disputa aberta.");
+  const { transacao, profile } = await executarTransicao(id, aplicarAberturaDisputa, motivo || "Disputa aberta.");
+
+  const outraParte = profile.id === transacao.comprador_id ? transacao.vendedor_id : transacao.comprador_id;
+  await notificar({
+    profileId: outraParte,
+    tipo: "disputa_aberta",
+    titulo: "Disputa aberta",
+    corpo: "Uma disputa foi aberta nesta negociação. Nossa equipe vai analisar e entrar em contato.",
+  });
 }
 
 // Cancelamento reabre o anúncio para outros compradores.

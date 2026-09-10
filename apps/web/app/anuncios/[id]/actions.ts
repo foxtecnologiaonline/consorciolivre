@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { requireProfile, requireUser } from "@/lib/auth";
+import { notificar } from "@/lib/notificacoes/notificar";
 
 export async function criarProposta(formData: FormData) {
   const { supabase, profile } = await requireProfile();
@@ -38,6 +39,13 @@ export async function criarProposta(formData: FormData) {
   });
 
   if (error) redirect(`/anuncios/${anuncioId}?erro=${encodeURIComponent(error.message)}`);
+
+  await notificar({
+    profileId: anuncio!.vendedor_id,
+    tipo: "proposta_recebida",
+    titulo: "Nova proposta recebida",
+    corpo: `Você recebeu uma proposta de ${valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} no seu anúncio.`,
+  });
 
   redirect(`/anuncios/${anuncioId}?sucesso=${encodeURIComponent("Proposta enviada! Acompanhe em Minhas propostas.")}`);
 }

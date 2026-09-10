@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { TransicaoInvalidaError, confirmarPagamentoGateway } from "@/lib/transacoes/state-machine";
 import { autenticado, eventoIndicaPago, extrairIdPedido, type PagarmeWebhookPayload } from "@/lib/pagarme/webhook";
+import { notificar } from "@/lib/notificacoes/notificar";
 
 // Webhook do Pagar.me — confirma pagamento PIX real (docs/ARCHITECTURE.md §8
 // item 4/5). Autenticação via Basic Auth configurada no dashboard do Pagar.me
@@ -79,6 +80,19 @@ export async function POST(request: NextRequest) {
       status_novo: transicao.statusNovo,
       ator_id: null,
       observacao: "Pagamento PIX confirmado pelo Pagar.me (webhook).",
+    });
+
+    await notificar({
+      profileId: transacao.comprador_id,
+      tipo: "pagamento_confirmado",
+      titulo: "Pagamento confirmado",
+      corpo: "Seu pagamento PIX foi confirmado e está retido em escrow até a transferência da cota.",
+    });
+    await notificar({
+      profileId: transacao.vendedor_id,
+      tipo: "pagamento_confirmado",
+      titulo: "Pagamento recebido",
+      corpo: "O pagamento da sua venda foi confirmado. Inicie a transferência da cota na administradora.",
     });
   } catch (erro) {
     if (erro instanceof TransicaoInvalidaError) {

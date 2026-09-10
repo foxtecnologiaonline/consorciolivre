@@ -147,7 +147,7 @@ Toda mudança de status grava uma linha em `transacao_eventos` (quem, quando, de
 Fixar 1 gateway evita retrabalho de reconciliação financeira com múltiplos formatos de webhook.
 - **KYC**: provedor terceirizado (Idwall / unico|check / CAF) via API, plataforma só armazena o resultado e um hash/URL do documento, nunca reimplementa biometria.
 - **Filas/jobs assíncronos**: Supabase Cron / Edge Functions agendadas (ou um worker leve) para: expirar anúncios, lembrar pagamentos pendentes, reconciliar webhooks de pagamento, enviar notificações.
-- **Notificações**: e-mail transacional (Resend/SendGrid) + push web + (fase 2) WhatsApp/SMS.
+- **Notificações**: e-mail transacional — decisão fechada: **Resend**. Push web e WhatsApp/SMS ficam para fase 2.
 - **Observabilidade**: logs estruturados, Sentry para erros, dashboard de métricas de negócio (funil de conversão, GMV, ticket médio).
 
 ### 5.2 Por que este stack
@@ -205,7 +205,7 @@ Regras mantidas pelo próprio banco (não só pela aplicação), via constraint/
 **MVP (fase 1) — concluído**
 - Cadastro + KYC básico, publicação de anúncio, busca/filtros, chat, proposta de preço, pagamento com escrow manual (checklist operacional), avaliação pós-venda.
 
-**Fase 2 — backlog de execução (ordem fixa, uma tarefa por vez)**
+**Fase 2 — backlog de execução (ordem fixa, uma tarefa por vez)** — itens 1-7 concluídos (escrow automatizado ponta a ponta: cobrança PIX, webhook, liberação, disputa, notificações). Falta só o item 8 (app mobile), que é uma frente própria — ver ressalva de validação contra sandbox real do Pagar.me repetida nos itens 2-6 antes de qualquer deploy em produção.
 
 1. ~~Infra de teste~~ — Vitest configurado, CI (lint+test) rodando, máquina de estado de `transacoes` extraída para módulo puro e testada (caminho feliz + 1 erro por transição). **Concluído.**
 2. ~~Cadastro de `recipient_id` do Pagar.me~~ — vendedor com KYC aprovado cadastra conta bancária (`/painel/dados-bancarios`), backend cria o recebedor no Pagar.me e grava `profiles.pagarme_recipient_id` (coluna protegida por trigger contra escrita direta do client). Publicação de anúncio bloqueada sem isso (`lib/vendedor/elegibilidade.ts`). **Concluído** — payload da API validado só pela documentação pública conhecida (sem acesso a `docs.pagar.me` nem chave de sandbox neste ambiente); **validar contra o sandbox real do Pagar.me antes de produção**.
@@ -213,7 +213,7 @@ Regras mantidas pelo próprio banco (não só pela aplicação), via constraint/
 4. ~~Webhook do Pagar.me~~ (`POST /api/webhooks/pagarme`, Route Handler com `service_role`) — idempotente via `idx_pagamentos_gateway_ref` já existente, atualiza `pagamentos.status` e dispara transição de `transacoes.status` (`aguardando_pagamento` → `pagamento_em_escrow`), com evento em `transacao_eventos`. Substituiu o botão manual "Já paguei" do comprador — a confirmação de pagamento passa a ser só o gateway, nunca autodeclarada. **Concluído** — formato exato do payload de evento do Pagar.me não confirmado (sem sandbox neste ambiente); interpretação isolada em `lib/pagarme/webhook.ts`, testada com os formatos plausíveis conhecidos.
 5. ~~Liberação de escrow automatizada~~ — ao confirmar a transferência de titularidade, além de `transacoes.status = 'concluida'`, dispara transferência explícita do valor líquido (`valor_acordado - comissao_valor`) para o `recipient_id` do vendedor (`POST /core/v5/transfers`) e atualiza `pagamentos.status = 'liberado_vendedor'`. **Concluído** — mesma ressalva dos itens anteriores: endpoint/payload de transferência não validado contra sandbox real. Falha na transferência não desfaz a conclusão da transação (a cota já é do comprador); fica um evento em `transacao_eventos` para reconciliação manual.
 6. ~~Fluxo de disputa guiado~~ — a Server Action de staff (`painel/admin/disputas`) agora chama de verdade o Pagar.me: "liberar ao vendedor" dispara `liberarEscrow` (mesma transferência do item 5), "estornar comprador" cancela a charge (`POST /core/v5/charges/{id}/cancel`) via `estornarEscrow`, ambas em `lib/pagamentos/escrow.ts` (compartilhado com a liberação automática do item 5). **Concluído** — "dividir" o valor entre as partes ficou de fora: exigiria um campo de valor parcial e um status novo que a UI/schema atuais não têm (fase 2.1); decisão de staff hoje é sempre liberar ou estornar o total.
-7. Notificações: e-mail transacional (proposta recebida, pagamento confirmado, documento aprovado/reprovado, disputa aberta) — hoje só existe a tabela `notificacoes`; falta o disparo real.
+7. ~~Notificações~~ — e-mail transacional via **Resend** (decisão fechada) + registro in-app na tabela `notificacoes` já existente, sempre via `service_role` (política de RLS nunca permitiu INSERT pro client comum). Cobre os 4 eventos citados: proposta recebida, pagamento confirmado (webhook), documento aprovado/reprovado, disputa aberta. **Concluído** — e-mail é best-effort (falha no Resend não derruba o fluxo principal); push web e WhatsApp/SMS continuam fora do MVP (fase 2).
 8. App mobile (React Native/Expo) reaproveitando a mesma API/Supabase — só depois dos itens 1–7 estarem em produção.
 
 **Fase 3**

@@ -506,6 +506,36 @@ export interface Database {
           },
         ];
       };
+      notificacoes: {
+        Row: {
+          id: string;
+          profile_id: string;
+          tipo: string;
+          titulo: string;
+          corpo: string | null;
+          lida: boolean;
+          criado_em: string;
+        };
+        Insert: {
+          profile_id: string;
+          tipo: string;
+          titulo: string;
+          corpo?: string | null;
+          lida?: boolean;
+        };
+        Update: {
+          lida?: boolean;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "notificacoes_profile_id_fkey";
+            columns: ["profile_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
