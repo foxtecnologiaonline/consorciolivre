@@ -4,6 +4,8 @@ Marketplace de compra e venda de cartas de consórcio contempladas e não contem
 
 > **v2 — revisão**: adicionado papel `staff/admin` com policies de moderação, máquinas de estado explícitas de anúncio/transação, matriz de RLS ("quem vê o quê"), busca textual via `pg_trgm` (sem dependência externa no MVP), tabela de favoritos, idempotência de webhook de pagamento (`gateway + gateway_referencia` único), sincronização automática de `kyc_status` e `reputacao_media` por trigger, e trava de "uma cota = um anúncio ativo por vez". Detalhes no schema (`supabase/migrations/0001_init.sql`).
 
+> **v3 — revisão (set/2026)**: fecha a decisão de gateway de pagamento/escrow (era "ex.: Pagar.me, Mercado Pago, Asaas ou Stripe Connect" — agora **Pagar.me, decisão única**, split nativo via `recipient_id`) e formaliza como regras de engenharia não-negociáveis práticas que já existiam informalmente no schema (idempotência de webhook, trilha de auditoria, máquina de estado). Ver §5.1 e §5.4. Avaliada e descartada explicitamente a adoção de NestJS/modular monolith, Redis/BullMQ, Meilisearch e integração de frete (Melhor Envio/Frenet): esses itens vêm de um escopo genérico de e-commerce multi-vendedor de produtos físicos e não se aplicam ao Consórcio Livre, que negocia titularidade de cotas — não há catálogo de produtos, estoque ou envio físico. Ver §5.5 para o racional completo dessa decisão.
+
 ## 1. Visão geral
 
 O Consórcio Livre conecta quem quer **vender uma cota de consórcio** (contemplada ou não, de imóvel, veículo, moto, serviços etc.) a quem quer **comprar essa cota** por um valor abaixo do saldo devedor, evitando os ágios e a opacidade do mercado informal (grupos de WhatsApp, classificados sem garantia).
@@ -137,7 +139,7 @@ Toda mudança de status grava uma linha em `transacao_eventos` (quem, quando, de
 - **Banco de dados**: PostgreSQL via **Supabase** (Auth, Row Level Security, Storage para documentos, Realtime para chat/notificações).
 - **Autenticação**: Supabase Auth (e-mail/senha + OAuth Google) com MFA opcional.
 - **Storage de documentos**: Supabase Storage, buckets privados com URLs assinadas de curta duração (documentos de identidade e titularidade nunca são públicos).
-- **Pagamentos/escrow**: gateway com suporte a marketplace/split de pagamento (ex.: Pagar.me, Mercado Pago, Asaas ou Stripe Connect) — dinheiro entra na conta da plataforma/subconta escrow e é repassado ao vendedor só após confirmação da etapa de transferência.
+- **Pagamentos/escrow**: **Pagar.me** — decisão única, não mais em aberto. O split é nativo via `recipient_id`: cada vendedor precisa de um `recipient_id` cadastrado no Pagar.me no momento em que sua conta é aprovada (staff aprova KYC → backend cria/valida o recipient antes de liberar publicação de anúncio). O comprador paga o valor cheio da transação; o Pagar.me já calcula o split entre a conta da plataforma (retém como escrow) e o `recipient_id` do vendedor no momento da criação da cobrança, sem o vendedor precisar de conta própria na adquirente. A liberação ao vendedor (`pagamentos.status = 'liberado_vendedor'`) só é disparada depois da etapa de transferência de titularidade confirmada — antes disso o valor fica retido do lado da plataforma dentro do próprio split. Fixar 1 gateway evita retrabalho de reconciliação financeira com múltiplos formatos de webhook.
 - **KYC**: provedor terceirizado (Idwall / unico|check / CAF) via API, plataforma só armazena o resultado e um hash/URL do documento, nunca reimplementa biometria.
 - **Filas/jobs assíncronos**: Supabase Cron / Edge Functions agendadas (ou um worker leve) para: expirar anúncios, lembrar pagamentos pendentes, reconciliar webhooks de pagamento, enviar notificações.
 - **Notificações**: e-mail transacional (Resend/SendGrid) + push web + (fase 2) WhatsApp/SMS.
@@ -157,6 +159,29 @@ Toda mudança de status grava uma linha em `transacao_eventos` (quem, quando, de
 - **Idempotência de pagamento**: webhooks do gateway são gravados com `(gateway, gateway_referencia)` único — reentrega do mesmo evento pelo provedor não duplica a liberação de escrow. A escrita nessa tabela é feita exclusivamente pela Edge Function com `service_role` (o client nunca marca um pagamento como confirmado).
 - **Busca**: MVP usa índice `pg_trgm` do próprio Postgres em título/descrição do anúncio — evita depender de um serviço de busca externo (Algolia/Meilisearch) antes de haver volume que justifique o custo; migrar é um passo isolado quando o catálogo crescer.
 
+### 5.4 Regras de engenharia não-negociáveis
+
+- **Regra de ouro**: nenhuma feature nova entra sem teste automatizado cobrindo o caminho feliz + 1 caminho de erro. O repositório ainda não tem test runner configurado — isso é dívida a resolver antes da próxima feature de dinheiro/estoque de cota (ver backlog, §8).
+- **Idempotência**: todo endpoint/Server Action que move dinheiro (pagamento, liberação de escrow) ou muda posse de cota (aceitar proposta, criar transação) precisa ser seguro para reexecução. Hoje isso já existe para o webhook de pagamento (`idx_pagamentos_gateway_ref`); ao trocar o escrow manual pela integração real com o Pagar.me, o mesmo padrão (chave de idempotência única por evento) se aplica a qualquer novo endpoint de cobrança/estorno.
+- **Toda transição de status gera evento/auditoria**: já implementado para `transacoes` via `transacao_eventos` (trigger `trg_touch_transacoes` + inserts explícitos nas actions). Ao evoluir `pagamentos` para o fluxo automatizado do Pagar.me, cada mudança de `pagamentos.status` também deve gravar uma linha auditável (reaproveitar `transacao_eventos` referenciando o pagamento na observação, ou — se o volume justificar — criar `pagamento_eventos` dedicado) em vez de só fazer `UPDATE` destrutivo.
+- **Tabelas financeiras são append-only para auditoria**: `transacao_eventos` nunca sofre `UPDATE`/`DELETE` pela aplicação (só `INSERT`); `pagamentos` pode até atualizar campos de controle (`status`, `confirmado_em`, `liberado_em`), mas a *razão* de cada mudança tem que sobreviver em algum registro append-only — nunca só "o status virou outro" sem rastro de por quê.
+- **Nenhum módulo lê tabela de domínio alheio diretamente pelo client** — o padrão já usado (Server Actions/route handlers como fronteira, RLS por tabela) cumpre esse papel sem precisar de schemas Postgres separados por módulo: a fronteira é a Server Action + RLS, não um schema.
+- **LGPD**: dado pessoal de KYC (documento, selfie, CPF/CNPJ) nunca aparece em log de aplicação nem é acessível por outro usuário além do dono e do staff (já garantido por RLS em `kyc_verificacoes`/`titularidade_documentos` — manter ao adicionar qualquer feature nova que toque essas tabelas).
+
+### 5.5 O que foi avaliado e descartado (e por quê)
+
+Um documento de escopo genérico de "marketplace multi-vendedor" (referências Amazon/Magalu/Mercado Livre/Shopee) foi revisado item a item contra o domínio real do Consórcio Livre. Decisões:
+
+| Proposta genérica | Decisão | Motivo |
+|---|---|---|
+| NestJS + Modular Monolith (schema por módulo) | **Não adotar** | O time é pequeno e o Next.js/Supabase atual já entrega auth, RLS e Storage prontos; migrar de framework/infra sem um driver de negócio concreto (escala, time crescendo) é retrabalho puro. A fronteira de módulo já existe via Server Actions + RLS por tabela (§5.4). |
+| Redis + BullMQ | **Não adotar agora** | Não há hoje nenhum job assíncrono que Supabase Cron/Edge Functions não resolvam (expirar anúncio, lembrete, reconciliação). Reavaliar só se aparecer um caso real de fila com retry/backoff complexo que Edge Functions não cubram bem. |
+| Meilisearch | **Não adotar agora** | `pg_trgm` já é a decisão registrada desde a v2 e ainda não há volume de anúncios que justifique operar um serviço de busca externo. Mantido como passo isolado futuro (já previsto em §5.3). |
+| Melhor Envio / Frenet (frete) | **Não se aplica** | Consórcio Livre não movimenta produto físico — a "entrega" é a transferência de titularidade da cota junto à administradora, fora do sistema. Não existe nem existirá tabela `shipments` neste domínio. |
+| Modelo `Order` → N `SubOrder` por carrinho multi-vendedor | **Não se aplica** | Aqui cada `Anuncio` é uma cota única de um vendedor; não há carrinho com itens de N vendedores no mesmo checkout — a unidade de negociação já é 1 anúncio → 1 proposta → 1 transação. |
+| Pagar.me como gateway único, split via `recipient_id` | **Adotado** | Resolve exatamente a mesma necessidade de escrow/split que o Consórcio Livre já tinha em aberto (§5.1) — aqui a "adaptação" foi apenas fechar uma decisão que já estava listada como opção. |
+| Idempotência de endpoint financeiro / evento por transição de status / auditoria append-only / regra de teste obrigatório | **Adotado como prática geral** | São práticas de engenharia agnósticas de domínio e de stack — já parcialmente implementadas no schema atual (§5.4), só faltava declará-las explicitamente como regra do projeto. |
+
 ## 6. Modelo de dados (schema inicial)
 
 Ver `supabase/migrations/0001_init.sql` para o DDL completo. Tabelas principais:
@@ -172,14 +197,24 @@ Regras mantidas pelo próprio banco (não só pela aplicação), via constraint/
 
 ## 8. Roadmap
 
-**MVP (fase 1)**
+**MVP (fase 1) — concluído**
 - Cadastro + KYC básico, publicação de anúncio, busca/filtros, chat, proposta de preço, pagamento com escrow manual (checklist operacional), avaliação pós-venda.
 
-**Fase 2**
-- Automação total do escrow (webhooks de gateway), disputas com fluxo guiado, notificações por WhatsApp, app mobile (React Native/Expo reaproveitando a mesma API/Supabase).
+**Fase 2 — backlog de execução (ordem fixa, uma tarefa por vez)**
+
+1. Infra de teste: adicionar Vitest (+ Testing Library se necessário para Server Actions/components), configurar `npm test` no CI, e cobrir com teste (caminho feliz + 1 erro) pelo menos o fluxo de máquina de estado de `transacoes` já existente antes de tocar em pagamento de verdade.
+2. Cadastro de `recipient_id` do Pagar.me: no fluxo de aprovação de KYC/staff, criar o recipient do vendedor no Pagar.me e persistir o id em `profiles` (nova coluna). Sem `recipient_id` válido, vendedor não pode ter anúncio publicado.
+3. Integração de cobrança real: Server Action de checkout cria a transação de pagamento no Pagar.me com split (plataforma + `recipient_id` do vendedor), grava em `pagamentos` (`gateway = 'pagarme'`, `gateway_referencia` = id da transação no Pagar.me).
+4. Webhook do Pagar.me (`POST /api/webhooks/pagarme`, Route Handler com `service_role`): idempotente via `idx_pagamentos_gateway_ref` já existente, atualiza `pagamentos.status` e dispara transição de `transacoes.status` (`aguardando_pagamento` → `pagamento_em_escrow`), com evento em `transacao_eventos`.
+5. Liberação de escrow automatizada: quando staff confirma a transferência de titularidade (upload de comprovante já previsto no fluxo), dispara liberação do split ao vendedor no Pagar.me e atualiza `pagamentos.status = 'liberado_vendedor'` + `transacoes.status = 'concluida'`.
+6. Fluxo de disputa guiado: hoje `painel/admin/disputas` existe na UI — falta a Server Action de staff decidir (liberar vendedor / estornar comprador / dividir) chamando a API de estorno/liberação parcial do Pagar.me, com evento de auditoria.
+7. Notificações: e-mail transacional (proposta recebida, pagamento confirmado, documento aprovado/reprovado, disputa aberta) — hoje só existe a tabela `notificacoes`; falta o disparo real.
+8. App mobile (React Native/Expo) reaproveitando a mesma API/Supabase — só depois dos itens 1–7 estarem em produção.
 
 **Fase 3**
 - Score de crédito/reputação avançado, parcerias diretas com administradoras (API de transferência), recomendação personalizada de cotas, seguro de transação.
+
+Nenhum item de "fase 3" ou funcionalidade fora deste roadmap (catálogo de produtos, estoque, frete, carrinho multi-vendedor) entra antes da Fase 2 estar em produção.
 
 ## 9. Estrutura de repositório
 
