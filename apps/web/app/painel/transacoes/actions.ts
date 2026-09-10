@@ -12,6 +12,7 @@ import {
 } from "@/lib/transacoes/state-machine";
 import type { Transacao as TransacaoDominio, TransacaoStatus } from "@/lib/transacoes/state-machine";
 import { PagarmeError, criarPedidoPix } from "@/lib/pagarme/client";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 async function carregarTransacao(supabase: any, id: string) {
   const { data } = await supabase.from("transacoes").select("*").eq("id", id).maybeSingle();
@@ -126,7 +127,11 @@ export async function gerarCobrancaPix(formData: FormData) {
     redirect(`/painel/transacoes/${id}?erro=${encodeURIComponent(mensagem)}`);
   }
 
-  const { error } = await supabase.from("pagamentos").insert({
+  // pagamentos só tem policy de SELECT pro client comum (ver
+  // supabase/migrations/0001_init.sql) — escrita é sempre via service_role,
+  // mesmo essa que só registra o pedido PIX recém-criado no Pagar.me.
+  const admin = createAdminClient();
+  const { error } = await admin.from("pagamentos").insert({
     transacao_id: id,
     gateway: "pagarme",
     gateway_referencia: pedido.orderId,
