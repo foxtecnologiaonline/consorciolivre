@@ -3,9 +3,9 @@ import {
   TransicaoInvalidaError,
   abrirDisputa,
   cancelarTransacao,
+  confirmarPagamentoGateway,
   confirmarRecebimento,
   confirmarTransferencia,
-  marcarPagamentoRealizado,
   type Transacao,
 } from "./state-machine";
 
@@ -17,21 +17,16 @@ function criarTransacao(status: Transacao["status"]): Transacao {
   return { status, compradorId: COMPRADOR_ID, vendedorId: VENDEDOR_ID };
 }
 
-describe("marcarPagamentoRealizado", () => {
-  it("comprador confirma pagamento e a transação vai para pagamento_em_escrow", () => {
+describe("confirmarPagamentoGateway", () => {
+  it("webhook confirma pagamento e a transação vai para pagamento_em_escrow", () => {
     const transacao = criarTransacao("aguardando_pagamento");
-    const resultado = marcarPagamentoRealizado(transacao, COMPRADOR_ID);
+    const resultado = confirmarPagamentoGateway(transacao);
     expect(resultado).toEqual({ statusAnterior: "aguardando_pagamento", statusNovo: "pagamento_em_escrow" });
   });
 
-  it("rejeita quando não é o comprador quem confirma", () => {
-    const transacao = criarTransacao("aguardando_pagamento");
-    expect(() => marcarPagamentoRealizado(transacao, VENDEDOR_ID)).toThrow(TransicaoInvalidaError);
-  });
-
-  it("rejeita quando o status já não é aguardando_pagamento", () => {
+  it("rejeita replay do webhook quando o status já não é aguardando_pagamento", () => {
     const transacao = criarTransacao("pagamento_em_escrow");
-    expect(() => marcarPagamentoRealizado(transacao, COMPRADOR_ID)).toThrow(TransicaoInvalidaError);
+    expect(() => confirmarPagamentoGateway(transacao)).toThrow(TransicaoInvalidaError);
   });
 });
 

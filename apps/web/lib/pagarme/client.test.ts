@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { montarPayloadCriacaoRecebedor, type DadosBancarios, type DadosRecebedor } from "./client";
+import {
+  montarPayloadCriacaoRecebedor,
+  montarPayloadPedidoPix,
+  type DadosBancarios,
+  type DadosPedidoPix,
+  type DadosRecebedor,
+} from "./client";
 
 const recebedorPf: DadosRecebedor = {
   nome: "Maria Silva",
@@ -57,5 +63,46 @@ describe("montarPayloadCriacaoRecebedor", () => {
       company_name: "Consorcio Livre LTDA",
     });
     expect(payload.register_information).not.toHaveProperty("name");
+  });
+});
+
+describe("montarPayloadPedidoPix", () => {
+  const dadosPedido: DadosPedidoPix = {
+    valorCentavos: 150000,
+    descricao: "Cota Embracon grupo 123",
+    referenciaExterna: "transacao-abc-123",
+    cliente: {
+      nome: "João Comprador",
+      email: "joao@example.com",
+      documento: "98765432100",
+      tipoPessoa: "individual",
+    },
+  };
+
+  it("monta o pedido com um item, cliente e método pix com expiração padrão de 1h", () => {
+    const payload = montarPayloadPedidoPix(dadosPedido);
+
+    expect(payload.items).toEqual([
+      { amount: 150000, description: "Cota Embracon grupo 123", quantity: 1, code: "transacao-abc-123" },
+    ]);
+    expect(payload.customer).toEqual({
+      name: "João Comprador",
+      email: "joao@example.com",
+      type: "individual",
+      document: "98765432100",
+      document_type: "CPF",
+    });
+    expect(payload.payments).toEqual([{ payment_method: "pix", pix: { expires_in: 3600 } }]);
+  });
+
+  it("usa document_type CNPJ e expiração customizada para pessoa jurídica", () => {
+    const payload = montarPayloadPedidoPix({
+      ...dadosPedido,
+      expiraEmSegundos: 900,
+      cliente: { ...dadosPedido.cliente, tipoPessoa: "company", documento: "12345678000199" },
+    });
+
+    expect(payload.customer.document_type).toBe("CNPJ");
+    expect(payload.payments[0].pix.expires_in).toBe(900);
   });
 });

@@ -342,6 +342,48 @@ export interface Database {
           },
         ];
       };
+      pagamentos: {
+        Row: {
+          id: string;
+          transacao_id: string;
+          gateway: string;
+          gateway_referencia: string | null;
+          metodo: "pix" | "boleto" | "cartao" | null;
+          valor: number;
+          status: "pendente" | "confirmado" | "falhou" | "estornado" | "liberado_vendedor";
+          pix_qr_code: string | null;
+          pix_qr_code_url: string | null;
+          expira_em: string | null;
+          criado_em: string;
+          confirmado_em: string | null;
+          liberado_em: string | null;
+        };
+        Insert: {
+          transacao_id: string;
+          gateway: string;
+          gateway_referencia?: string | null;
+          metodo?: "pix" | "boleto" | "cartao" | null;
+          valor: number;
+          status?: "pendente" | "confirmado" | "falhou" | "estornado" | "liberado_vendedor";
+          pix_qr_code?: string | null;
+          pix_qr_code_url?: string | null;
+          expira_em?: string | null;
+        };
+        Update: {
+          status?: "pendente" | "confirmado" | "falhou" | "estornado" | "liberado_vendedor";
+          confirmado_em?: string | null;
+          liberado_em?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "pagamentos_transacao_id_fkey";
+            columns: ["transacao_id"];
+            isOneToOne: false;
+            referencedRelation: "transacoes";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       transacao_eventos: {
         Row: {
           id: string;

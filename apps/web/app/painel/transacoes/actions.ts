@@ -9,9 +9,9 @@ import {
   cancelarTransacao as aplicarCancelamento,
   confirmarRecebimento as aplicarConfirmacaoRecebimento,
   confirmarTransferencia as aplicarConfirmacaoTransferencia,
-  marcarPagamentoRealizado as aplicarMarcacaoPagamento,
 } from "@/lib/transacoes/state-machine";
 import type { Transacao as TransacaoDominio, TransacaoStatus } from "@/lib/transacoes/state-machine";
+import { PagarmeError, criarPedidoPix } from "@/lib/pagarme/client";
 
 async function carregarTransacao(supabase: any, id: string) {
   const { data } = await supabase.from("transacoes").select("*").eq("id", id).maybeSingle();
@@ -73,9 +73,81 @@ async function executarTransicao(
   return { transacao, profile, supabase };
 }
 
-export async function marcarPagamentoRealizado(formData: FormData) {
+// Gera (ou reaproveita, se ainda válido) a cobrança PIX da transação. A
+// confirmação de pagamento em si NÃO acontece aqui — vem só do webhook do
+// Pagar.me (app/api/webhooks/pagarme/route.ts), nunca de autodeclaração do
+// comprador.
+export async function gerarCobrancaPix(formData: FormData) {
+  const { supabase, user, profile } = await requireProfile();
   const id = String(formData.get("id"));
-  await executarTransicao(id, aplicarMarcacaoPagamento, "Comprador confirmou o pagamento.");
+  const transacao = await carregarTransacao(supabase, id);
+
+  if (!transacao || transacao.comprador_id !== profile.id || transacao.status !== "aguardando_pagamento") {
+    redirect(`/painel/transacoes/${id}?erro=` + encodeURIComponent("Ação não permitida neste momento."));
+  }
+
+  const { data: pagamentoPendente } = await supabase
+    .from("pagamentos")
+    .select("id, pix_qr_code, expira_em")
+    .eq("transacao_id", id)
+    .eq("status", "pendente")
+    .maybeSingle();
+
+  if (pagamentoPendente?.pix_qr_code && pagamentoPendente.expira_em && new Date(pagamentoPendente.expira_em) > new Date()) {
+    // Já existe uma cobrança válida — não gera outra, só mostra a que existe.
+    return;
+  }
+
+  if (!user.email) {
+    redirect(
+      `/painel/transacoes/${id}?erro=` +
+        encodeURIComponent("Cadastre um e-mail na sua conta para gerar a cobrança PIX.")
+    );
+  }
+
+  let pedido;
+  try {
+    pedido = await criarPedidoPix({
+      valorCentavos: Math.round(transacao!.valor_acordado * 100),
+      descricao: `Consórcio Livre — transação ${id}`,
+      referenciaExterna: id,
+      cliente: {
+        nome: profile.nome_completo,
+        email: user.email!,
+        documento: profile.documento,
+        tipoPessoa: profile.tipo_pessoa === "pf" ? "individual" : "company",
+      },
+    });
+  } catch (erro) {
+    const mensagem =
+      erro instanceof PagarmeError
+        ? "Não foi possível gerar a cobrança PIX agora. Tente novamente em instantes."
+        : "Erro inesperado ao gerar a cobrança.";
+    redirect(`/painel/transacoes/${id}?erro=${encodeURIComponent(mensagem)}`);
+  }
+
+  const { error } = await supabase.from("pagamentos").insert({
+    transacao_id: id,
+    gateway: "pagarme",
+    gateway_referencia: pedido.orderId,
+    metodo: "pix",
+    valor: transacao!.valor_acordado,
+    status: "pendente",
+    pix_qr_code: pedido.qrCode,
+    pix_qr_code_url: pedido.qrCodeUrl,
+    expira_em: pedido.expiraEm,
+  });
+
+  if (error) {
+    // 23505 = unique_violation do índice idx_pagamentos_transacao_pendente:
+    // outra requisição concorrente já criou a cobrança pendente — não é erro
+    // do ponto de vista do usuário, só mostra a que já existe.
+    if ((error as { code?: string }).code !== "23505") {
+      redirect(`/painel/transacoes/${id}?erro=${encodeURIComponent(error.message)}`);
+    }
+  }
+
+  revalidatePath(`/painel/transacoes/${id}`);
 }
 
 export async function confirmarRecebimento(formData: FormData) {

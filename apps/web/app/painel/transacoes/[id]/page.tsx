@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { requireProfile } from "@/lib/auth";
 import {
-  marcarPagamentoRealizado,
+  gerarCobrancaPix,
   confirmarRecebimento,
   confirmarTransferencia,
   abrirDisputa,
@@ -55,6 +55,16 @@ export default async function TransacaoDetalhePage({
     .eq("autor_id", profile.id)
     .maybeSingle();
 
+  const { data: pagamentoPendente } = await supabase
+    .from("pagamentos")
+    .select("pix_qr_code, pix_qr_code_url, expira_em")
+    .eq("transacao_id", params.id)
+    .eq("status", "pendente")
+    .maybeSingle();
+
+  const cobrancaPixValida =
+    pagamentoPendente?.pix_qr_code && pagamentoPendente.expira_em && new Date(pagamentoPendente.expira_em) > new Date();
+
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-4 p-8">
       <h1 className="text-2xl font-semibold">{transacao.anuncios?.titulo}</h1>
@@ -87,20 +97,38 @@ export default async function TransacaoDetalhePage({
       </div>
 
       <div className="rounded border p-4">
-        <h2 className="mb-2 text-sm font-medium">Checklist da negociação (escrow manual)</h2>
+        <h2 className="mb-2 text-sm font-medium">Acompanhamento da negociação</h2>
         <p className="mb-3 text-xs text-neutral-500">
-          Combine o pagamento (PIX/transferência) pelo chat do anúncio. A plataforma ainda não
-          processa o pagamento automaticamente neste MVP — cada etapa é confirmada manualmente
-          pelas partes, e fica registrada abaixo para eventual disputa.
+          O pagamento é feito via PIX direto na plataforma e fica retido em escrow até a
+          transferência da cota ser confirmada. As demais etapas (transferência na
+          administradora) são confirmadas manualmente pelas partes e ficam registradas abaixo
+          para eventual disputa.
         </p>
 
         {transacao.status === "aguardando_pagamento" && ehComprador && (
           <div className="flex flex-col gap-2">
-            <p className="text-sm">1. Faça o pagamento combinado com o vendedor e confirme aqui.</p>
-            <form action={marcarPagamentoRealizado}>
-              <input type="hidden" name="id" value={transacao.id} />
-              <button className="rounded bg-neutral-900 px-4 py-2 text-sm text-white">Já paguei</button>
-            </form>
+            <p className="text-sm">1. Pague com PIX para colocar o valor em escrow.</p>
+            {cobrancaPixValida ? (
+              <div className="rounded border border-dashed p-3 text-sm">
+                {pagamentoPendente?.pix_qr_code_url && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={pagamentoPendente.pix_qr_code_url} alt="QR code PIX" className="mx-auto h-40 w-40" />
+                )}
+                <p className="mt-2 text-xs text-neutral-500">PIX copia e cola:</p>
+                <code className="block break-all rounded bg-neutral-100 p-2 text-xs">
+                  {pagamentoPendente?.pix_qr_code}
+                </code>
+                <p className="mt-2 text-xs text-neutral-500">
+                  Expira em {new Date(pagamentoPendente!.expira_em!).toLocaleString("pt-BR")}. A confirmação é
+                  automática assim que o Pagar.me processar o pagamento.
+                </p>
+              </div>
+            ) : (
+              <form action={gerarCobrancaPix}>
+                <input type="hidden" name="id" value={transacao.id} />
+                <button className="rounded bg-neutral-900 px-4 py-2 text-sm text-white">Gerar cobrança PIX</button>
+              </form>
+            )}
             <form action={cancelarTransacao}>
               <input type="hidden" name="id" value={transacao.id} />
               <button className="text-sm text-red-700 underline">Cancelar negociação</button>
@@ -108,7 +136,7 @@ export default async function TransacaoDetalhePage({
           </div>
         )}
         {transacao.status === "aguardando_pagamento" && ehVendedor && (
-          <p className="text-sm text-neutral-600">Aguardando o comprador confirmar o pagamento.</p>
+          <p className="text-sm text-neutral-600">Aguardando o comprador pagar via PIX.</p>
         )}
 
         {transacao.status === "pagamento_em_escrow" && ehVendedor && (

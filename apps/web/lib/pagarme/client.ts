@@ -90,6 +90,110 @@ export function montarPayloadCriacaoRecebedor(
   };
 }
 
+export interface ClientePagador {
+  nome: string;
+  email: string;
+  documento: string;
+  tipoPessoa: TipoPessoaPagarme;
+}
+
+export interface DadosPedidoPix {
+  valorCentavos: number;
+  descricao: string;
+  referenciaExterna: string; // transacoes.id — vai em items[].code, útil pra conciliação
+  cliente: ClientePagador;
+  expiraEmSegundos?: number;
+}
+
+export interface PayloadCriacaoPedidoPix {
+  items: Array<{ amount: number; description: string; quantity: number; code: string }>;
+  customer: {
+    name: string;
+    email: string;
+    type: TipoPessoaPagarme;
+    document: string;
+    document_type: "CPF" | "CNPJ";
+  };
+  payments: Array<{ payment_method: "pix"; pix: { expires_in: number } }>;
+}
+
+export function montarPayloadPedidoPix(dados: DadosPedidoPix): PayloadCriacaoPedidoPix {
+  return {
+    items: [
+      {
+        amount: dados.valorCentavos,
+        description: dados.descricao,
+        quantity: 1,
+        code: dados.referenciaExterna,
+      },
+    ],
+    customer: {
+      name: dados.cliente.nome,
+      email: dados.cliente.email,
+      type: dados.cliente.tipoPessoa,
+      document: dados.cliente.documento,
+      document_type: dados.cliente.tipoPessoa === "individual" ? "CPF" : "CNPJ",
+    },
+    payments: [
+      {
+        payment_method: "pix",
+        pix: { expires_in: dados.expiraEmSegundos ?? 3600 },
+      },
+    ],
+  };
+}
+
+export interface PedidoPixCriado {
+  orderId: string;
+  qrCode: string | null;
+  qrCodeUrl: string | null;
+  expiraEm: string | null;
+}
+
+// Cria o pedido no Pagar.me e retorna o necessário para exibir o QR code ao
+// comprador. Sem `split`: o valor fica 100% com a conta da plataforma até a
+// liberação de escrow (docs/ARCHITECTURE.md §5.1) — só ali o recipient_id do
+// vendedor entra em jogo, via transferência explícita.
+export async function criarPedidoPix(dados: DadosPedidoPix): Promise<PedidoPixCriado> {
+  const secretKey = process.env.PAGARME_SECRET_KEY;
+  if (!secretKey) {
+    throw new PagarmeError("PAGARME_SECRET_KEY não configurada.");
+  }
+
+  const resposta = await fetch(`${PAGARME_API_BASE}/orders`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: autenticacaoBasica(secretKey),
+    },
+    body: JSON.stringify(montarPayloadPedidoPix(dados)),
+  });
+
+  if (!resposta.ok) {
+    const corpo = await resposta.text();
+    throw new PagarmeError(`Falha ao criar pedido PIX no Pagar.me (${resposta.status}): ${corpo}`);
+  }
+
+  const pedido = (await resposta.json()) as {
+    id: string;
+    charges?: Array<{
+      last_transaction?: { qr_code?: string; qr_code_url?: string; expires_at?: string };
+    }>;
+  };
+
+  if (!pedido.id) {
+    throw new PagarmeError("Resposta do Pagar.me sem id de pedido.");
+  }
+
+  const ultimaTransacao = pedido.charges?.[0]?.last_transaction;
+  return {
+    orderId: pedido.id,
+    qrCode: ultimaTransacao?.qr_code ?? null,
+    qrCodeUrl: ultimaTransacao?.qr_code_url ?? null,
+    expiraEm: ultimaTransacao?.expires_at ?? null,
+  };
+}
+
 function autenticacaoBasica(secretKey: string) {
   return "Basic " + Buffer.from(`${secretKey}:`).toString("base64");
 }

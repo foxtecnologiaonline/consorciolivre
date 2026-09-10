@@ -26,10 +26,11 @@ function exigirParte(transacao: Transacao, atorId: string) {
   }
 }
 
-// Comprador confirma que fez o pagamento (fora da plataforma, combinado no chat).
-export function marcarPagamentoRealizado(transacao: Transacao, atorId: string): Transicao {
-  if (atorId !== transacao.compradorId || transacao.status !== "aguardando_pagamento") {
-    throw new TransicaoInvalidaError("Ação não permitida neste momento.");
+// Confirmação vem do webhook do gateway (pagamento real via PIX), não de um
+// ator humano — por isso não recebe/valida atorId como as demais transições.
+export function confirmarPagamentoGateway(transacao: Transacao): Transicao {
+  if (transacao.status !== "aguardando_pagamento") {
+    throw new TransicaoInvalidaError("Transação não está aguardando pagamento.");
   }
   return { statusAnterior: "aguardando_pagamento", statusNovo: "pagamento_em_escrow" };
 }
