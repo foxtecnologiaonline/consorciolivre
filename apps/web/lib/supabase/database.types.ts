@@ -31,6 +31,7 @@ export interface Database {
           reputacao_media: number;
           total_transacoes: number;
           suspenso: boolean;
+          pagarme_recipient_id: string | null;
           criado_em: string;
           atualizado_em: string;
         };
@@ -44,6 +45,42 @@ export interface Database {
         Update: {
           nome_completo?: string;
           telefone?: string | null;
+          // Colunas protegidas por trigger no banco (0005_pagarme_recebedor.sql):
+          // um client autenticado como usuário comum não consegue de fato alterar
+          // isto, só está aqui porque um cliente com service_role pode.
+          pagarme_recipient_id?: string | null;
+        };
+        Relationships: [];
+      };
+      contas_bancarias: {
+        Row: {
+          id: string;
+          profile_id: string;
+          banco_codigo: string;
+          agencia: string;
+          agencia_dv: string | null;
+          conta: string;
+          conta_dv: string;
+          tipo_conta: "corrente" | "poupanca";
+          criado_em: string;
+          atualizado_em: string;
+        };
+        Insert: {
+          profile_id: string;
+          banco_codigo: string;
+          agencia: string;
+          agencia_dv?: string | null;
+          conta: string;
+          conta_dv: string;
+          tipo_conta: "corrente" | "poupanca";
+        };
+        Update: {
+          banco_codigo?: string;
+          agencia?: string;
+          agencia_dv?: string | null;
+          conta?: string;
+          conta_dv?: string;
+          tipo_conta?: "corrente" | "poupanca";
         };
         Relationships: [];
       };

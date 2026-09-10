@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { requireProfile } from "@/lib/auth";
+import { elegibilidadeParaPublicar } from "@/lib/vendedor/elegibilidade";
 
 function toNumber(value: FormDataEntryValue | null) {
   return Number(String(value ?? "0").replace(",", "."));
@@ -10,8 +11,12 @@ function toNumber(value: FormDataEntryValue | null) {
 export async function criarAnuncio(formData: FormData) {
   const { supabase, profile } = await requireProfile();
 
-  if (profile.kyc_status !== "aprovado") {
-    redirect("/painel/verificacao");
+  const elegibilidade = elegibilidadeParaPublicar({
+    kycStatus: profile.kyc_status,
+    pagarmeRecipientId: profile.pagarme_recipient_id,
+  });
+  if (!elegibilidade.elegivel) {
+    redirect(elegibilidade.motivo === "kyc_pendente" ? "/painel/verificacao" : "/painel/dados-bancarios");
   }
 
   const cotaPayload = {

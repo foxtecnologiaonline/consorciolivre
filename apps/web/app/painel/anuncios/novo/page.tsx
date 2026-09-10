@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requireProfile } from "@/lib/auth";
+import { elegibilidadeParaPublicar } from "@/lib/vendedor/elegibilidade";
 import { criarAnuncio } from "./actions";
 
 export default async function NovoAnuncioPage({
@@ -9,15 +10,33 @@ export default async function NovoAnuncioPage({
 }) {
   const { supabase, profile } = await requireProfile();
 
-  if (profile.kyc_status !== "aprovado") {
+  const elegibilidade = elegibilidadeParaPublicar({
+    kycStatus: profile.kyc_status,
+    pagarmeRecipientId: profile.pagarme_recipient_id,
+  });
+
+  if (!elegibilidade.elegivel) {
+    const pendencia =
+      elegibilidade.motivo === "kyc_pendente"
+        ? {
+            titulo: "Verificação necessária",
+            texto: "Só usuários com identidade verificada podem publicar anúncios de venda.",
+            href: "/painel/verificacao",
+            acao: "Solicitar verificação",
+          }
+        : {
+            titulo: "Conta bancária necessária",
+            texto: "Cadastre a conta onde quer receber o valor das suas vendas antes de publicar.",
+            href: "/painel/dados-bancarios",
+            acao: "Cadastrar conta bancária",
+          };
+
     return (
       <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 p-8 text-center">
-        <h1 className="text-xl font-semibold">Verificação necessária</h1>
-        <p className="text-sm text-neutral-600">
-          Só usuários com identidade verificada podem publicar anúncios de venda.
-        </p>
-        <Link href="/painel/verificacao" className="rounded bg-neutral-900 py-2 text-white">
-          Solicitar verificação
+        <h1 className="text-xl font-semibold">{pendencia.titulo}</h1>
+        <p className="text-sm text-neutral-600">{pendencia.texto}</p>
+        <Link href={pendencia.href} className="rounded bg-neutral-900 py-2 text-white">
+          {pendencia.acao}
         </Link>
       </main>
     );
