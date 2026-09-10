@@ -348,6 +348,7 @@ export interface Database {
           transacao_id: string;
           gateway: string;
           gateway_referencia: string | null;
+          gateway_charge_id: string | null;
           metodo: "pix" | "boleto" | "cartao" | null;
           valor: number;
           status: "pendente" | "confirmado" | "falhou" | "estornado" | "liberado_vendedor";
@@ -362,6 +363,7 @@ export interface Database {
           transacao_id: string;
           gateway: string;
           gateway_referencia?: string | null;
+          gateway_charge_id?: string | null;
           metodo?: "pix" | "boleto" | "cartao" | null;
           valor: number;
           status?: "pendente" | "confirmado" | "falhou" | "estornado" | "liberado_vendedor";

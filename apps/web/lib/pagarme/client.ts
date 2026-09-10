@@ -145,6 +145,7 @@ export function montarPayloadPedidoPix(dados: DadosPedidoPix): PayloadCriacaoPed
 
 export interface PedidoPixCriado {
   orderId: string;
+  chargeId: string | null;
   qrCode: string | null;
   qrCodeUrl: string | null;
   expiraEm: string | null;
@@ -177,6 +178,7 @@ export async function criarPedidoPix(dados: DadosPedidoPix): Promise<PedidoPixCr
   const pedido = (await resposta.json()) as {
     id: string;
     charges?: Array<{
+      id?: string;
       last_transaction?: { qr_code?: string; qr_code_url?: string; expires_at?: string };
     }>;
   };
@@ -185,13 +187,35 @@ export async function criarPedidoPix(dados: DadosPedidoPix): Promise<PedidoPixCr
     throw new PagarmeError("Resposta do Pagar.me sem id de pedido.");
   }
 
-  const ultimaTransacao = pedido.charges?.[0]?.last_transaction;
+  const charge = pedido.charges?.[0];
   return {
     orderId: pedido.id,
-    qrCode: ultimaTransacao?.qr_code ?? null,
-    qrCodeUrl: ultimaTransacao?.qr_code_url ?? null,
-    expiraEm: ultimaTransacao?.expires_at ?? null,
+    chargeId: charge?.id ?? null,
+    qrCode: charge?.last_transaction?.qr_code ?? null,
+    qrCodeUrl: charge?.last_transaction?.qr_code_url ?? null,
+    expiraEm: charge?.last_transaction?.expires_at ?? null,
   };
+}
+
+// Cancela/estorna a cobrança — usado na resolução de disputa a favor do
+// comprador (docs/ARCHITECTURE.md §8 item 7). Como nunca houve split na
+// cobrança (§5.1), o estorno é sempre total e sai direto da conta da
+// plataforma, sem envolver o recipient_id do vendedor.
+export async function estornarPagamento(chargeId: string): Promise<void> {
+  const secretKey = process.env.PAGARME_SECRET_KEY;
+  if (!secretKey) {
+    throw new PagarmeError("PAGARME_SECRET_KEY não configurada.");
+  }
+
+  const resposta = await fetch(`${PAGARME_API_BASE}/charges/${chargeId}/cancel`, {
+    method: "DELETE",
+    headers: { Authorization: autenticacaoBasica(secretKey) },
+  });
+
+  if (!resposta.ok) {
+    const corpo = await resposta.text();
+    throw new PagarmeError(`Falha ao estornar cobrança no Pagar.me (${resposta.status}): ${corpo}`);
+  }
 }
 
 function autenticacaoBasica(secretKey: string) {
