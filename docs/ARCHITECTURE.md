@@ -156,7 +156,7 @@ Fixar 1 gateway evita retrabalho de reconciliação financeira com múltiplos fo
 - Pagamento com split nativo evita a plataforma "tocar" no dinheiro diretamente (reduz risco regulatório) e resolve o escrow.
 
 ### 5.3 Segurança e compliance
-- **LGPD**: consentimento explícito de coleta de documentos, política de retenção (dados de KYC reprovado apagados após prazo definido), portal de titular de dados (exportar/excluir conta).
+- **LGPD**: consentimento explícito de coleta de documentos; política de retenção — **implementada**: KYC reprovado é apagado após 90 dias via cron (`/api/cron/expurgo-kyc`, `lib/kyc/expurgo.ts`); KYC aprovado é mantido (retenção legal de prevenção a fraude/lavagem se sobrepõe ao pedido de eliminação). Portal de titular de dados — **implementado** em `/painel/conta`: exportar (`GET /api/conta/exportar`, dados via RLS do próprio client de sessão) e excluir (anonimiza `profiles` + apaga `contas_bancarias` + soft-delete no Supabase Auth, bloqueado se houver transação/anúncio em andamento — `lib/conta/exclusao.ts`).
 - **RLS no Postgres**: políticas por tabela — usuário só lê/escreve seus próprios registros; anúncios `publicado` são públicos, o resto é restrito.
 - **Antifraude**: rate limit em cadastro/propostas, verificação de duplicidade de CPF/cota, bloqueio de troca de contato externo no chat (regex + moderação), lista de administradoras/documentos "conhecidos" para reduzir golpes.
 - **Segregação de segredos**: chaves do gateway de pagamento e do provedor de KYC apenas em Edge Functions/servidor, nunca no client.

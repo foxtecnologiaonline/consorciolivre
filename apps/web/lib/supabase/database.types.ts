@@ -45,10 +45,12 @@ export interface Database {
         Update: {
           nome_completo?: string;
           telefone?: string | null;
+          documento?: string;
           // Colunas protegidas por trigger no banco (0005_pagarme_recebedor.sql):
           // um client autenticado como usuário comum não consegue de fato alterar
           // isto, só está aqui porque um cliente com service_role pode.
           pagarme_recipient_id?: string | null;
+          suspenso?: boolean;
         };
         Relationships: [];
       };
