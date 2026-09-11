@@ -6,20 +6,43 @@ import { requireStaff } from "@/lib/auth";
 import { dividirEscrow, estornarEscrow, liberarEscrow } from "@/lib/pagamentos/escrow";
 import { PercentualInvalidoError } from "@/lib/pagamentos/divisao";
 
+const DECISOES_VALIDAS = ["concluida", "reembolsada", "dividida"] as const;
+type Decisao = (typeof DECISOES_VALIDAS)[number];
+
 export async function resolverDisputa(formData: FormData) {
   const { supabase, profile } = await requireStaff();
 
   const id = String(formData.get("id"));
-  const decisao = String(formData.get("decisao")) as "concluida" | "reembolsada" | "dividida";
+  const decisaoBruta = String(formData.get("decisao"));
   const observacao = String(formData.get("observacao") ?? "").trim();
+
+  // Sem isso, qualquer valor inesperado em "decisao" cairia no `else` de
+  // liberarEscrow (fail-open liberando dinheiro ao vendedor) mesmo que o
+  // UPDATE em transacoes tivesse falhado silenciosamente na constraint de
+  // status. Nunca assumir "senão deve ser concluída" numa ação que move
+  // dinheiro de verdade.
+  if (!DECISOES_VALIDAS.includes(decisaoBruta as Decisao)) {
+    redirect("/painel/admin/disputas?erro=" + encodeURIComponent("Decisão inválida."));
+  }
+  const decisao = decisaoBruta as Decisao;
 
   const { data: transacao } = await supabase
     .from("transacoes")
-    .select("anuncio_id, vendedor_id, valor_acordado, comissao_valor")
+    .select("status, anuncio_id, vendedor_id, valor_acordado, comissao_valor")
     .eq("id", id)
     .maybeSingle();
 
   if (!transacao) return;
+
+  // Idempotência: uma disputa já resolvida (segundo clique, página não
+  // revalidada, requisição duplicada) não pode sobrescrever o status final
+  // nem reabrir o anúncio de uma transação que já foi paga/estornada — as
+  // funções de escrow até se protegem sozinhas (só agem sobre `pagamentos`
+  // ainda 'confirmado'), mas sem essa guarda o `transacoes.status` e o
+  // `anuncios.status` seriam sobrescritos mesmo assim.
+  if (transacao.status !== "em_disputa") {
+    redirect("/painel/admin/disputas?erro=" + encodeURIComponent("Esta disputa já foi resolvida."));
+  }
 
   let percentualVendedor = 0;
   if (decisao === "dividida") {
@@ -29,7 +52,11 @@ export async function resolverDisputa(formData: FormData) {
     }
   }
 
-  await supabase.from("transacoes").update({ status: decisao }).eq("id", id);
+  const { error: erroTransacao } = await supabase.from("transacoes").update({ status: decisao }).eq("id", id);
+  if (erroTransacao) {
+    redirect("/painel/admin/disputas?erro=" + encodeURIComponent(erroTransacao.message));
+  }
+
   await supabase.from("transacao_eventos").insert({
     transacao_id: id,
     status_anterior: "em_disputa",

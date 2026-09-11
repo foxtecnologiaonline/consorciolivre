@@ -11,6 +11,8 @@
 // plausíveis, mas isso precisa ser confirmado com um evento real do sandbox
 // antes de ir para produção.
 
+import { comparacaoSegura } from "@/lib/seguranca/comparacaoSegura";
+
 export interface PagarmeWebhookPayload {
   type?: string;
   data?: {
@@ -37,7 +39,7 @@ export function autenticado(headers: Headers): boolean {
   } catch {
     return false;
   }
-  return decodificado === `${usuario}:${senha}`;
+  return comparacaoSegura(decodificado, `${usuario}:${senha}`);
 }
 
 export function extrairIdPedido(payload: PagarmeWebhookPayload): string | null {

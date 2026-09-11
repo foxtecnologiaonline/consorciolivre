@@ -105,6 +105,13 @@ export async function estornarEscrow(transacaoId: string) {
 // o restante é devolvido ao comprador — nenhuma suposição sobre a posse da
 // cota além do que staff já registrou na observação da disputa (ver
 // docs/ARCHITECTURE.md §5.1, nota sobre o status 'dividida').
+//
+// `valorTotal` recebido aqui é o valor_acordado CHEIO (não
+// valor_acordado - comissao_valor): decisão explícita de não cobrar
+// comissão da plataforma numa divisão, pelo mesmo raciocínio do reembolso
+// total (estornarEscrow) — sem uma venda que se completou de verdade, não
+// há o que a plataforma cobrar. Revisar se o entendimento de negócio for
+// "cobrar comissão proporcional sobre a parte liberada ao vendedor".
 export async function dividirEscrow(transacaoId: string, vendedorId: string, valorTotal: number, percentualVendedor: number) {
   const admin = createAdminClient();
 
