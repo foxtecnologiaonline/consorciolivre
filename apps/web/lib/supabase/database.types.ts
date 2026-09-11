@@ -244,6 +244,51 @@ export interface Database {
           },
         ];
       };
+      titularidade_documentos: {
+        Row: {
+          id: string;
+          cota_id: string;
+          tipo: "contrato_adesao" | "extrato_administradora" | "termo_contemplacao" | "outro";
+          arquivo_url: string;
+          validado: boolean;
+          validado_por: string | null;
+          criado_em: string;
+        };
+        Insert: {
+          cota_id: string;
+          tipo: "contrato_adesao" | "extrato_administradora" | "termo_contemplacao" | "outro";
+          arquivo_url: string;
+          validado?: boolean;
+          validado_por?: string | null;
+        };
+        Update: {
+          validado?: boolean;
+          validado_por?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "titularidade_documentos_cota_id_fkey";
+            columns: ["cota_id"];
+            isOneToOne: false;
+            referencedRelation: "cotas";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      favoritos: {
+        Row: { profile_id: string; anuncio_id: string; criado_em: string };
+        Insert: { profile_id: string; anuncio_id: string };
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "favoritos_anuncio_id_fkey";
+            columns: ["anuncio_id"];
+            isOneToOne: false;
+            referencedRelation: "anuncios";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       propostas: {
         Row: {
           id: string;

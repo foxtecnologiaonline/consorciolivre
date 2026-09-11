@@ -49,6 +49,9 @@ export default async function PainelPage() {
         <Link href="/painel/transacoes" className="rounded border p-4 hover:bg-neutral-50">
           Transações
         </Link>
+        <Link href="/painel/conta" className="rounded border p-4 hover:bg-neutral-50">
+          Conta e privacidade
+        </Link>
         {(profile.role === "staff" || profile.role === "admin") && (
           <Link href="/painel/admin" className="rounded border p-4 hover:bg-neutral-50">
             Painel de moderação (staff)

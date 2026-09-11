@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/expurgo-kyc",
+      "schedule": "0 3 * * *"
+    }
+  ]
+}
