@@ -354,6 +354,9 @@ export interface Database {
           status: "pendente" | "confirmado" | "falhou" | "estornado" | "liberado_vendedor";
           pix_qr_code: string | null;
           pix_qr_code_url: string | null;
+          boleto_linha_digitavel: string | null;
+          boleto_url: string | null;
+          boleto_pdf_url: string | null;
           expira_em: string | null;
           criado_em: string;
           confirmado_em: string | null;
@@ -369,6 +372,9 @@ export interface Database {
           status?: "pendente" | "confirmado" | "falhou" | "estornado" | "liberado_vendedor";
           pix_qr_code?: string | null;
           pix_qr_code_url?: string | null;
+          boleto_linha_digitavel?: string | null;
+          boleto_url?: string | null;
+          boleto_pdf_url?: string | null;
           expira_em?: string | null;
         };
         Update: {

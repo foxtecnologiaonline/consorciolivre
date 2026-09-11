@@ -97,15 +97,18 @@ export interface ClientePagador {
   tipoPessoa: TipoPessoaPagarme;
 }
 
-export interface DadosPedidoPix {
+interface DadosPedidoBase {
   valorCentavos: number;
   descricao: string;
   referenciaExterna: string; // transacoes.id — vai em items[].code, útil pra conciliação
   cliente: ClientePagador;
+}
+
+export interface DadosPedidoPix extends DadosPedidoBase {
   expiraEmSegundos?: number;
 }
 
-export interface PayloadCriacaoPedidoPix {
+interface BasePedido {
   items: Array<{ amount: number; description: string; quantity: number; code: string }>;
   customer: {
     name: string;
@@ -114,10 +117,9 @@ export interface PayloadCriacaoPedidoPix {
     document: string;
     document_type: "CPF" | "CNPJ";
   };
-  payments: Array<{ payment_method: "pix"; pix: { expires_in: number } }>;
 }
 
-export function montarPayloadPedidoPix(dados: DadosPedidoPix): PayloadCriacaoPedidoPix {
+function montarBasePedido(dados: DadosPedidoBase): BasePedido {
   return {
     items: [
       {
@@ -134,6 +136,16 @@ export function montarPayloadPedidoPix(dados: DadosPedidoPix): PayloadCriacaoPed
       document: dados.cliente.documento,
       document_type: dados.cliente.tipoPessoa === "individual" ? "CPF" : "CNPJ",
     },
+  };
+}
+
+export interface PayloadCriacaoPedidoPix extends BasePedido {
+  payments: Array<{ payment_method: "pix"; pix: { expires_in: number } }>;
+}
+
+export function montarPayloadPedidoPix(dados: DadosPedidoPix): PayloadCriacaoPedidoPix {
+  return {
+    ...montarBasePedido(dados),
     payments: [
       {
         payment_method: "pix",
@@ -141,6 +153,78 @@ export function montarPayloadPedidoPix(dados: DadosPedidoPix): PayloadCriacaoPed
       },
     ],
   };
+}
+
+export interface DadosPedidoBoleto extends DadosPedidoBase {
+  vencimentoEm: string; // ISO 8601 (due_at)
+  instrucoes?: string;
+}
+
+export interface PayloadCriacaoPedidoBoleto extends BasePedido {
+  payments: Array<{
+    payment_method: "boleto";
+    boleto: { due_at: string; instructions?: string; document_number: string };
+  }>;
+}
+
+export function montarPayloadPedidoBoleto(dados: DadosPedidoBoleto): PayloadCriacaoPedidoBoleto {
+  return {
+    ...montarBasePedido(dados),
+    payments: [
+      {
+        payment_method: "boleto",
+        boleto: {
+          due_at: dados.vencimentoEm,
+          instructions: dados.instrucoes,
+          document_number: dados.referenciaExterna,
+        },
+      },
+    ],
+  };
+}
+
+interface PedidoBruto {
+  id: string;
+  charges?: Array<{
+    id?: string;
+    last_transaction?: {
+      qr_code?: string;
+      qr_code_url?: string;
+      expires_at?: string;
+      url?: string;
+      line?: string;
+      pdf?: string;
+    };
+  }>;
+}
+
+// POST /core/v5/orders compartilhado entre PIX e boleto — só o `payments[]`
+// do payload muda entre os dois métodos.
+async function criarPedido(payload: PayloadCriacaoPedidoPix | PayloadCriacaoPedidoBoleto, descricaoMetodo: string) {
+  const secretKey = process.env.PAGARME_SECRET_KEY;
+  if (!secretKey) {
+    throw new PagarmeError("PAGARME_SECRET_KEY não configurada.");
+  }
+
+  const resposta = await fetch(`${PAGARME_API_BASE}/orders`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: autenticacaoBasica(secretKey),
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!resposta.ok) {
+    const corpo = await resposta.text();
+    throw new PagarmeError(`Falha ao criar pedido ${descricaoMetodo} no Pagar.me (${resposta.status}): ${corpo}`);
+  }
+
+  const pedido = (await resposta.json()) as PedidoBruto;
+  if (!pedido.id) {
+    throw new PagarmeError("Resposta do Pagar.me sem id de pedido.");
+  }
+  return pedido;
 }
 
 export interface PedidoPixCriado {
@@ -156,37 +240,7 @@ export interface PedidoPixCriado {
 // liberação de escrow (docs/ARCHITECTURE.md §5.1) — só ali o recipient_id do
 // vendedor entra em jogo, via transferência explícita.
 export async function criarPedidoPix(dados: DadosPedidoPix): Promise<PedidoPixCriado> {
-  const secretKey = process.env.PAGARME_SECRET_KEY;
-  if (!secretKey) {
-    throw new PagarmeError("PAGARME_SECRET_KEY não configurada.");
-  }
-
-  const resposta = await fetch(`${PAGARME_API_BASE}/orders`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: autenticacaoBasica(secretKey),
-    },
-    body: JSON.stringify(montarPayloadPedidoPix(dados)),
-  });
-
-  if (!resposta.ok) {
-    const corpo = await resposta.text();
-    throw new PagarmeError(`Falha ao criar pedido PIX no Pagar.me (${resposta.status}): ${corpo}`);
-  }
-
-  const pedido = (await resposta.json()) as {
-    id: string;
-    charges?: Array<{
-      id?: string;
-      last_transaction?: { qr_code?: string; qr_code_url?: string; expires_at?: string };
-    }>;
-  };
-
-  if (!pedido.id) {
-    throw new PagarmeError("Resposta do Pagar.me sem id de pedido.");
-  }
-
+  const pedido = await criarPedido(montarPayloadPedidoPix(dados), "PIX");
   const charge = pedido.charges?.[0];
   return {
     orderId: pedido.id,
@@ -194,6 +248,31 @@ export async function criarPedidoPix(dados: DadosPedidoPix): Promise<PedidoPixCr
     qrCode: charge?.last_transaction?.qr_code ?? null,
     qrCodeUrl: charge?.last_transaction?.qr_code_url ?? null,
     expiraEm: charge?.last_transaction?.expires_at ?? null,
+  };
+}
+
+export interface PedidoBoletoCriado {
+  orderId: string;
+  chargeId: string | null;
+  linhaDigitavel: string | null;
+  url: string | null;
+  pdfUrl: string | null;
+  expiraEm: string | null;
+}
+
+// Mesmo modelo do PIX (sem split — ver criarPedidoPix), só troca o método de
+// pagamento. Vencimento padrão de 3 dias úteis é decisão de produto, não do
+// gateway — ajustável por quem chama via `dados.vencimentoEm`.
+export async function criarPedidoBoleto(dados: DadosPedidoBoleto): Promise<PedidoBoletoCriado> {
+  const pedido = await criarPedido(montarPayloadPedidoBoleto(dados), "boleto");
+  const charge = pedido.charges?.[0];
+  return {
+    orderId: pedido.id,
+    chargeId: charge?.id ?? null,
+    linhaDigitavel: charge?.last_transaction?.line ?? null,
+    url: charge?.last_transaction?.url ?? null,
+    pdfUrl: charge?.last_transaction?.pdf ?? null,
+    expiraEm: dados.vencimentoEm,
   };
 }
 

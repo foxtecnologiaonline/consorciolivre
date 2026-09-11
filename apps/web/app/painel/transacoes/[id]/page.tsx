@@ -3,6 +3,7 @@ import Link from "next/link";
 import { requireProfile } from "@/lib/auth";
 import {
   gerarCobrancaPix,
+  gerarCobrancaBoleto,
   confirmarRecebimento,
   confirmarTransferencia,
   abrirDisputa,
@@ -57,7 +58,7 @@ export default async function TransacaoDetalhePage({
 
   const { data: pagamentoPendente } = await supabase
     .from("pagamentos")
-    .select("pix_qr_code, pix_qr_code_url, expira_em")
+    .select("metodo, pix_qr_code, pix_qr_code_url, boleto_linha_digitavel, boleto_url, boleto_pdf_url, expira_em")
     .eq("transacao_id", params.id)
     .eq("status", "pendente")
     .maybeSingle();
@@ -70,8 +71,8 @@ export default async function TransacaoDetalhePage({
     .limit(1)
     .maybeSingle();
 
-  const cobrancaPixValida =
-    pagamentoPendente?.pix_qr_code && pagamentoPendente.expira_em && new Date(pagamentoPendente.expira_em) > new Date();
+  const cobrancaValida =
+    pagamentoPendente?.expira_em && new Date(pagamentoPendente.expira_em) > new Date() ? pagamentoPendente : null;
 
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-4 p-8">
@@ -115,27 +116,49 @@ export default async function TransacaoDetalhePage({
 
         {transacao.status === "aguardando_pagamento" && ehComprador && (
           <div className="flex flex-col gap-2">
-            <p className="text-sm">1. Pague com PIX para colocar o valor em escrow.</p>
-            {cobrancaPixValida ? (
+            <p className="text-sm">1. Pague para colocar o valor em escrow.</p>
+            {cobrancaValida?.metodo === "pix" && (
               <div className="rounded border border-dashed p-3 text-sm">
-                {pagamentoPendente?.pix_qr_code_url && (
+                {cobrancaValida.pix_qr_code_url && (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={pagamentoPendente.pix_qr_code_url} alt="QR code PIX" className="mx-auto h-40 w-40" />
+                  <img src={cobrancaValida.pix_qr_code_url} alt="QR code PIX" className="mx-auto h-40 w-40" />
                 )}
                 <p className="mt-2 text-xs text-neutral-500">PIX copia e cola:</p>
-                <code className="block break-all rounded bg-neutral-100 p-2 text-xs">
-                  {pagamentoPendente?.pix_qr_code}
-                </code>
+                <code className="block break-all rounded bg-neutral-100 p-2 text-xs">{cobrancaValida.pix_qr_code}</code>
                 <p className="mt-2 text-xs text-neutral-500">
-                  Expira em {new Date(pagamentoPendente!.expira_em!).toLocaleString("pt-BR")}. A confirmação é
-                  automática assim que o Pagar.me processar o pagamento.
+                  Expira em {new Date(cobrancaValida.expira_em!).toLocaleString("pt-BR")}. A confirmação é automática
+                  assim que o Pagar.me processar o pagamento.
                 </p>
               </div>
-            ) : (
-              <form action={gerarCobrancaPix}>
-                <input type="hidden" name="id" value={transacao.id} />
-                <button className="rounded bg-neutral-900 px-4 py-2 text-sm text-white">Gerar cobrança PIX</button>
-              </form>
+            )}
+            {cobrancaValida?.metodo === "boleto" && (
+              <div className="rounded border border-dashed p-3 text-sm">
+                <p className="text-xs text-neutral-500">Linha digitável:</p>
+                <code className="block break-all rounded bg-neutral-100 p-2 text-xs">
+                  {cobrancaValida.boleto_linha_digitavel}
+                </code>
+                {cobrancaValida.boleto_pdf_url && (
+                  <a href={cobrancaValida.boleto_pdf_url} target="_blank" rel="noreferrer" className="mt-2 block underline">
+                    Ver boleto em PDF
+                  </a>
+                )}
+                <p className="mt-2 text-xs text-neutral-500">
+                  Vence em {new Date(cobrancaValida.expira_em!).toLocaleDateString("pt-BR")}. A confirmação é
+                  automática após a compensação (pode levar até 2 dias úteis).
+                </p>
+              </div>
+            )}
+            {!cobrancaValida && (
+              <div className="flex gap-2">
+                <form action={gerarCobrancaPix}>
+                  <input type="hidden" name="id" value={transacao.id} />
+                  <button className="rounded bg-neutral-900 px-4 py-2 text-sm text-white">Pagar com PIX</button>
+                </form>
+                <form action={gerarCobrancaBoleto}>
+                  <input type="hidden" name="id" value={transacao.id} />
+                  <button className="rounded border border-neutral-900 px-4 py-2 text-sm">Pagar com boleto</button>
+                </form>
+              </div>
             )}
             <form action={cancelarTransacao}>
               <input type="hidden" name="id" value={transacao.id} />

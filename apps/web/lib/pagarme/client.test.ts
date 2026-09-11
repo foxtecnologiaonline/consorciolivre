@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   montarPayloadCriacaoRecebedor,
+  montarPayloadPedidoBoleto,
   montarPayloadPedidoPix,
   montarPayloadTransferencia,
   type DadosBancarios,
+  type DadosPedidoBoleto,
   type DadosPedidoPix,
   type DadosRecebedor,
   type DadosTransferencia,
@@ -122,5 +124,44 @@ describe("montarPayloadTransferencia", () => {
       recipient_id: "rp_123",
       metadata: { transacao_id: "transacao-abc-123" },
     });
+  });
+});
+
+describe("montarPayloadPedidoBoleto", () => {
+  const dadosBoleto: DadosPedidoBoleto = {
+    valorCentavos: 150000,
+    descricao: "Cota Embracon grupo 123",
+    referenciaExterna: "transacao-abc-123",
+    vencimentoEm: "2026-09-15T00:00:00Z",
+    cliente: {
+      nome: "João Comprador",
+      email: "joao@example.com",
+      documento: "98765432100",
+      tipoPessoa: "individual",
+    },
+  };
+
+  it("monta o pedido com item, cliente e método boleto com vencimento e document_number", () => {
+    const payload = montarPayloadPedidoBoleto(dadosBoleto);
+
+    expect(payload.items).toEqual([
+      { amount: 150000, description: "Cota Embracon grupo 123", quantity: 1, code: "transacao-abc-123" },
+    ]);
+    expect(payload.payments).toEqual([
+      {
+        payment_method: "boleto",
+        boleto: {
+          due_at: "2026-09-15T00:00:00Z",
+          instructions: undefined,
+          document_number: "transacao-abc-123",
+        },
+      },
+    ]);
+  });
+
+  it("reaproveita o mesmo customer do pedido PIX (mesma base compartilhada)", () => {
+    const pix = montarPayloadPedidoPix(dadosBoleto);
+    const boleto = montarPayloadPedidoBoleto(dadosBoleto);
+    expect(boleto.customer).toEqual(pix.customer);
   });
 });
