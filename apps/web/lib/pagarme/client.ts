@@ -277,10 +277,11 @@ export async function criarPedidoBoleto(dados: DadosPedidoBoleto): Promise<Pedid
 }
 
 // Cancela/estorna a cobrança — usado na resolução de disputa a favor do
-// comprador (docs/ARCHITECTURE.md §8 item 7). Como nunca houve split na
-// cobrança (§5.1), o estorno é sempre total e sai direto da conta da
-// plataforma, sem envolver o recipient_id do vendedor.
-export async function estornarPagamento(chargeId: string): Promise<void> {
+// comprador, total (docs/ARCHITECTURE.md §8 item 7) ou parcial (item 8,
+// resolução por divisão). Como nunca houve split na cobrança (§5.1), o
+// estorno sai direto da conta da plataforma, sem envolver o recipient_id do
+// vendedor. Sem `valorParcialCentavos`, cancela o valor total da cobrança.
+export async function estornarPagamento(chargeId: string, valorParcialCentavos?: number): Promise<void> {
   const secretKey = process.env.PAGARME_SECRET_KEY;
   if (!secretKey) {
     throw new PagarmeError("PAGARME_SECRET_KEY não configurada.");
@@ -288,7 +289,12 @@ export async function estornarPagamento(chargeId: string): Promise<void> {
 
   const resposta = await fetch(`${PAGARME_API_BASE}/charges/${chargeId}/cancel`, {
     method: "DELETE",
-    headers: { Authorization: autenticacaoBasica(secretKey) },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: autenticacaoBasica(secretKey),
+    },
+    body:
+      valorParcialCentavos !== undefined ? JSON.stringify({ amount: valorParcialCentavos }) : undefined,
   });
 
   if (!resposta.ok) {

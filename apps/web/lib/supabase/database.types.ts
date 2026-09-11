@@ -344,7 +344,8 @@ export interface Database {
             | "concluida"
             | "cancelada"
             | "em_disputa"
-            | "reembolsada";
+            | "reembolsada"
+            | "dividida";
           criado_em: string;
           atualizado_em: string;
         };
@@ -363,7 +364,8 @@ export interface Database {
             | "concluida"
             | "cancelada"
             | "em_disputa"
-            | "reembolsada";
+            | "reembolsada"
+            | "dividida";
         };
         Relationships: [
           {
@@ -398,7 +400,7 @@ export interface Database {
           gateway_charge_id: string | null;
           metodo: "pix" | "boleto" | "cartao" | null;
           valor: number;
-          status: "pendente" | "confirmado" | "falhou" | "estornado" | "liberado_vendedor";
+          status: "pendente" | "confirmado" | "falhou" | "estornado" | "liberado_vendedor" | "dividido";
           pix_qr_code: string | null;
           pix_qr_code_url: string | null;
           boleto_linha_digitavel: string | null;
@@ -416,7 +418,7 @@ export interface Database {
           gateway_charge_id?: string | null;
           metodo?: "pix" | "boleto" | "cartao" | null;
           valor: number;
-          status?: "pendente" | "confirmado" | "falhou" | "estornado" | "liberado_vendedor";
+          status?: "pendente" | "confirmado" | "falhou" | "estornado" | "liberado_vendedor" | "dividido";
           pix_qr_code?: string | null;
           pix_qr_code_url?: string | null;
           boleto_linha_digitavel?: string | null;
@@ -425,7 +427,7 @@ export interface Database {
           expira_em?: string | null;
         };
         Update: {
-          status?: "pendente" | "confirmado" | "falhou" | "estornado" | "liberado_vendedor";
+          status?: "pendente" | "confirmado" | "falhou" | "estornado" | "liberado_vendedor" | "dividido";
           confirmado_em?: string | null;
           liberado_em?: string | null;
         };

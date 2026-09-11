@@ -1,7 +1,7 @@
 import { requireStaff } from "@/lib/auth";
 import { resolverDisputa } from "./actions";
 
-export default async function AdminDisputasPage() {
+export default async function AdminDisputasPage({ searchParams }: { searchParams: { erro?: string } }) {
   const { supabase } = await requireStaff();
 
   const { data: disputas } = await supabase
@@ -15,6 +15,8 @@ export default async function AdminDisputasPage() {
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-4 p-8">
       <h1 className="text-2xl font-semibold">Disputas abertas</h1>
+
+      {searchParams.erro && <p className="rounded bg-red-50 p-2 text-sm text-red-700">{searchParams.erro}</p>}
 
       {(!disputas || disputas.length === 0) && (
         <p className="text-sm text-neutral-600">Nenhuma disputa aberta no momento.</p>
@@ -32,12 +34,26 @@ export default async function AdminDisputasPage() {
             <form action={resolverDisputa} className="mt-3 flex flex-col gap-2">
               <input type="hidden" name="id" value={d.id} />
               <input name="observacao" placeholder="Justificativa da decisão" className="rounded border px-3 py-2 text-sm" />
-              <div className="flex gap-2">
+              <label className="flex items-center gap-2 text-sm text-neutral-600">
+                Dividir: % para o vendedor
+                <input
+                  type="number"
+                  name="percentual_vendedor"
+                  min={0}
+                  max={100}
+                  defaultValue={50}
+                  className="w-20 rounded border px-2 py-1"
+                />
+              </label>
+              <div className="flex flex-wrap gap-2">
                 <button name="decisao" value="concluida" className="rounded bg-green-700 px-4 py-2 text-sm text-white">
                   Liberar ao vendedor (concluir)
                 </button>
                 <button name="decisao" value="reembolsada" className="rounded bg-red-700 px-4 py-2 text-sm text-white">
                   Reembolsar comprador
+                </button>
+                <button name="decisao" value="dividida" className="rounded bg-amber-700 px-4 py-2 text-sm text-white">
+                  Dividir
                 </button>
               </div>
             </form>

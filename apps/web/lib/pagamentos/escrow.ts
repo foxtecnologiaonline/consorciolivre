@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { criarTransferencia, estornarPagamento } from "@/lib/pagarme/client";
+import { calcularDivisaoDisputa } from "@/lib/pagamentos/divisao";
 
 // Move o valor líquido da plataforma para o recipient_id do vendedor no
 // Pagar.me — só quando a transferência de titularidade já foi confirmada (ou
@@ -98,4 +99,75 @@ export async function estornarEscrow(transacaoId: string) {
       status_novo: "reembolsada",
     });
   }
+}
+
+// Resolução de disputa por divisão: staff define o percentual do vendedor,
+// o restante é devolvido ao comprador — nenhuma suposição sobre a posse da
+// cota além do que staff já registrou na observação da disputa (ver
+// docs/ARCHITECTURE.md §5.1, nota sobre o status 'dividida').
+export async function dividirEscrow(transacaoId: string, vendedorId: string, valorTotal: number, percentualVendedor: number) {
+  const admin = createAdminClient();
+
+  const { valorVendedorCentavos, valorCompradorCentavos } = calcularDivisaoDisputa(
+    Math.round(valorTotal * 100),
+    percentualVendedor
+  );
+
+  const { data: vendedor } = await admin
+    .from("profiles")
+    .select("pagarme_recipient_id")
+    .eq("id", vendedorId)
+    .maybeSingle();
+
+  const { data: pagamento } = await admin
+    .from("pagamentos")
+    .select("id, gateway_charge_id")
+    .eq("transacao_id", transacaoId)
+    .eq("status", "confirmado")
+    .maybeSingle();
+
+  if (!pagamento?.gateway_charge_id) {
+    await admin.from("transacao_eventos").insert({
+      transacao_id: transacaoId,
+      observacao: "Divisão não disparada automaticamente: sem pagamento confirmado com charge conhecida.",
+      status_novo: "dividida",
+    });
+    return;
+  }
+
+  const falhas: string[] = [];
+
+  if (valorVendedorCentavos > 0) {
+    if (!vendedor?.pagarme_recipient_id) {
+      falhas.push("vendedor sem recipient_id — parte dele não foi transferida.");
+    } else {
+      try {
+        await criarTransferencia({
+          recipientId: vendedor.pagarme_recipient_id,
+          valorCentavos: valorVendedorCentavos,
+          referenciaExterna: transacaoId,
+        });
+      } catch {
+        falhas.push("falha ao transferir a parte do vendedor no Pagar.me.");
+      }
+    }
+  }
+
+  if (valorCompradorCentavos > 0) {
+    try {
+      await estornarPagamento(pagamento.gateway_charge_id, valorCompradorCentavos);
+    } catch {
+      falhas.push("falha ao estornar a parte do comprador no Pagar.me.");
+    }
+  }
+
+  await admin.from("pagamentos").update({ status: "dividido" }).eq("id", pagamento.id);
+  await admin.from("transacao_eventos").insert({
+    transacao_id: transacaoId,
+    observacao:
+      falhas.length > 0
+        ? `Divisão ${percentualVendedor}%/${100 - percentualVendedor}% processada com pendências: ${falhas.join(" ")} Requer reconciliação manual.`
+        : `Disputa dividida: ${percentualVendedor}% ao vendedor, ${100 - percentualVendedor}% estornado ao comprador.`,
+    status_novo: "dividida",
+  });
 }

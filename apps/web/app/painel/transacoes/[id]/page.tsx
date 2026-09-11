@@ -18,6 +18,7 @@ const STATUS_LABEL: Record<string, string> = {
   cancelada: "Cancelada",
   em_disputa: "Em disputa (aguardando análise da equipe)",
   reembolsada: "Reembolsada",
+  dividida: "Disputa resolvida com divisão do valor",
 };
 
 export default async function TransacaoDetalhePage({

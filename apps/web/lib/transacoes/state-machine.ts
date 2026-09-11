@@ -5,7 +5,8 @@ export type TransacaoStatus =
   | "concluida"
   | "cancelada"
   | "em_disputa"
-  | "reembolsada";
+  | "reembolsada"
+  | "dividida";
 
 export interface Transacao {
   status: TransacaoStatus;
